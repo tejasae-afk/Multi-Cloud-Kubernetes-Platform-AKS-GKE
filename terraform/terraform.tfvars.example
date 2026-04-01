@@ -1,0 +1,21 @@
+# DO NOT commit terraform.tfvars.
+# Copy this file to terraform.tfvars and change every value that is account or domain specific.
+
+gcp_project_id                = "acme-platform-dev-314159"
+azure_subscription_id         = "11111111-2222-3333-4444-555555555555"
+public_dns_zone_name          = "dev.acmeplatform.net"
+traffic_manager_relative_name = "mc-k8s-dev-acme-314159"
+
+# I found these last 1.29 patches on 2026-03-30:
+# GKE: 1.29.14-gke.1132000 (already out of support, so I don't pin it by default)
+# AKS: 1.29.15 (needs Premium + AKSLongTermSupport if you really want to stay there)
+# gke_version            = "1.29.14-gke.1132000"
+# aks_kubernetes_version = "1.29.15"
+# aks_sku_tier           = "Premium"
+# aks_support_plan       = "AKSLongTermSupport"
+
+gcp_region             = "us-central1"
+gcp_zone               = "us-central1-a"
+azure_location         = "eastus"
+public_app_record_name = "platform"
+gke_edge_record_name   = "gke-edge"

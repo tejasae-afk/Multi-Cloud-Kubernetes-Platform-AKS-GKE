@@ -1,0 +1,65 @@
+# Terraform
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.tfvars
+terraform.tfvars.bak
+
+# Kubernetes / Helm
+kubeconfig
+kubeconfig*
+*.kubeconfig
+.helm/
+chart.lock
+helmfile.lock
+
+# Secrets / local env
+*.pem
+*.key
+*.crt
+.env
+.env.*
+secrets.yaml
+.secrets.baseline
+
+# Go
+bin/
+dist/
+coverage.out
+*.test
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Scratch
+scratch.sh
+*.swp
+*.swo
+*.tmp
+*.bak
