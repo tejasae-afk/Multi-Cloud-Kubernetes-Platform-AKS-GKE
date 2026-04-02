@@ -16,6 +16,6 @@ spec:
       appProtocol: http
     - name: http-metrics
       port: {{ .Values.service.metricsPort }}
-      targetPort: http
+      targetPort: metrics
       protocol: TCP
       appProtocol: http
