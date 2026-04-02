@@ -1,0 +1,19 @@
+apiVersion: v2
+name: multi-cloud-k8s-platform
+description: I keep the app in one umbrella chart so I can install the same release shape on GKE and AKS.
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+dependencies:
+  - name: api-gateway
+    version: ~0.2.0
+    repository: file://charts/api-gateway
+    condition: api-gateway.enabled
+  - name: order-service
+    version: ~0.2.0
+    repository: file://charts/order-service
+    condition: order-service.enabled
+  - name: inventory-service
+    version: ~0.2.0
+    repository: file://charts/inventory-service
+    condition: inventory-service.enabled
