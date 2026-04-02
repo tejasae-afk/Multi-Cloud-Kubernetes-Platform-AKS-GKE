@@ -16,6 +16,7 @@ services:
       timeout: 5s
       retries: 4
       start_period: 10s
+    restart: unless-stopped
     networks:
       - platform
 
@@ -31,6 +32,7 @@ services:
     depends_on:
       inventory-service:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD
@@ -55,6 +57,7 @@ services:
     depends_on:
       order-service:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD
