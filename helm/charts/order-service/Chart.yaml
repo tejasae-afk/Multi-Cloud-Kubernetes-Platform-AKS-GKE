@@ -1,0 +1,6 @@
+apiVersion: v2
+name: order-service
+description: I use this subchart to keep order-service movable without turning the whole repo into one giant values file.
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
