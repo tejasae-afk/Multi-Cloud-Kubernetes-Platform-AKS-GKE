@@ -1,0 +1,72 @@
+services:
+  inventory-service:
+    build:
+      context: ./inventory-service
+    environment:
+      PORT: "8082"
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8082/healthz", timeout=2)
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    networks:
+      - platform
+
+  order-service:
+    build:
+      context: ./order-service
+    environment:
+      INVENTORY_SERVICE_URL: http://inventory-service:8082
+      PORT: "8081"
+      LOG_LEVEL: info
+    ports:
+      - "8081:8081"
+    depends_on:
+      inventory-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /app/order-service
+        - healthcheck
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    networks:
+      - platform
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    environment:
+      ORDER_SERVICE_URL: http://order-service:8081
+      PORT: "8080"
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /app/api-gateway
+        - healthcheck
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    networks:
+      - platform
+
+networks:
+  platform:
+    driver: bridge
