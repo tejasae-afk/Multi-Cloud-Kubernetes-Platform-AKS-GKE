@@ -1,0 +1,22 @@
+global:
+  podLabels:
+    azure.workload.identity/use: "true"
+  nodeAffinity:
+    key: kubernetes.azure.com/agentpool
+    values:
+      - system
+
+api-gateway:
+  serviceAccount:
+    annotations:
+      azure.workload.identity/client-id: "1e66f27e-651d-4c51-87d0-b0643031ea3f"
+
+order-service:
+  serviceAccount:
+    annotations:
+      azure.workload.identity/client-id: "93a0f583-7565-47cc-83a4-fb90f1d91c73"
+
+inventory-service:
+  serviceAccount:
+    annotations:
+      azure.workload.identity/client-id: "3503d87d-0f74-4911-b9a6-1fdad4d4f7ff"

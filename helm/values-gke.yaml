@@ -1,0 +1,20 @@
+global:
+  nodeAffinity:
+    key: cloud.google.com/gke-nodepool
+    values:
+      - primary
+
+api-gateway:
+  serviceAccount:
+    annotations:
+      iam.gke.io/gcp-service-account: mc-k8s-api-gw@mason-platform-dev.iam.gserviceaccount.com
+
+order-service:
+  serviceAccount:
+    annotations:
+      iam.gke.io/gcp-service-account: mc-k8s-order@mason-platform-dev.iam.gserviceaccount.com
+
+inventory-service:
+  serviceAccount:
+    annotations:
+      iam.gke.io/gcp-service-account: mc-k8s-inventory@mason-platform-dev.iam.gserviceaccount.com
