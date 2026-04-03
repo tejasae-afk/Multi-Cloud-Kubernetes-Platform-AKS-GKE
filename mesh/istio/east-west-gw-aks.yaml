@@ -19,6 +19,12 @@ spec:
           env:
             - name: ISTIO_META_REQUESTED_NETWORK_VIEW
               value: network2
+          serviceAnnotations:
+            # without this, the LB stays Pending forever on AKS. ask me how I know.
+            service.beta.kubernetes.io/port_15021_health-probe_protocol: "tcp"
+            service.beta.kubernetes.io/port_15443_health-probe_protocol: "tcp"
+            service.beta.kubernetes.io/port_15012_health-probe_protocol: "tcp"
+            service.beta.kubernetes.io/port_15017_health-probe_protocol: "tcp"
           resources:
             requests:
               cpu: 100m
