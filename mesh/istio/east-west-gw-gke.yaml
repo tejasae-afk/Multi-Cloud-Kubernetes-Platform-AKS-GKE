@@ -1,0 +1,50 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: mc-platform-eastwest-network1
+  namespace: istio-system
+spec:
+  profile: empty
+  tag: 1.29.1
+  components:
+    ingressGateways:
+      - name: istio-eastwestgateway
+        namespace: istio-system
+        enabled: true
+        label:
+          app: istio-eastwestgateway
+          istio: eastwestgateway
+          topology.istio.io/network: network1
+        k8s:
+          env:
+            - name: ISTIO_META_REQUESTED_NETWORK_VIEW
+              value: network1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          service:
+            type: LoadBalancer
+            externalTrafficPolicy: Cluster
+            ports:
+              - name: status-port
+                port: 15021
+                targetPort: 15021
+              - name: tls
+                port: 15443
+                targetPort: 15443
+              - name: tls-istiod
+                port: 15012
+                targetPort: 15012
+              - name: tls-webhook
+                port: 15017
+                targetPort: 15017
+  values:
+    gateways:
+      istio-ingressgateway:
+        injectionTemplate: gateway
+    global:
+      network: network1
