@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels:
+    topology.istio.io/network: network2
+---
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: mc-platform-control-plane
+  namespace: istio-system
+spec:
+  profile: default
+  tag: 1.29.1
+  meshConfig:
+    accessLogFile: /dev/stdout
+    accessLogEncoding: JSON
+    defaultConfig:
+      holdApplicationUntilProxyStarts: true
+    outboundTrafficPolicy:
+      mode: REGISTRY_ONLY
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+  values:
+    global:
+      meshID: multi-cloud-mesh
+      multiCluster:
+        clusterName: cluster2
+      network: network2
+      logging:
+        level: default:info
