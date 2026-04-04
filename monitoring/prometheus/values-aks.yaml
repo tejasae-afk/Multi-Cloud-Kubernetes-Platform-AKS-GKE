@@ -1,0 +1,134 @@
+fullnameOverride: mc-kps-aks
+
+commonLabels:
+  project: multi-cloud-k8s
+  environment: dev
+  managed-by: helm
+
+defaultRules:
+  create: true
+
+grafana:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+prometheusOperator:
+  tls:
+    enabled: true
+
+prometheus:
+  service:
+    type: ClusterIP
+  prometheusSpec:
+    externalLabels:
+      cluster: aks
+      region: eastus
+      platform: multi-cloud-k8s
+    retention: 5d
+    scrapeInterval: 15s
+    evaluationInterval: 30s
+    walCompression: true
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+    enableAdminAPI: false
+    resources:
+      requests:
+        cpu: 400m
+        memory: 1536Mi
+      limits:
+        cpu: "2"
+        memory: 3Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+    remoteWrite:
+      - url: __THANOS_RECEIVE_URL__
+        basicAuth:
+          username:
+            name: thanos-remote-write-auth
+            key: username
+          password:
+            name: thanos-remote-write-auth
+            key: password
+        queueConfig:
+          capacity: 20000
+          minShards: 1
+          maxShards: 20
+          maxSamplesPerSend: 2000
+        writeRelabelConfigs:
+          - sourceLabels:
+              - __name__
+            regex: (up|prometheus_.*|go_.*|process_.*|istio_.*|mcplatform_.*|kube_.*|container_.*|node_.*)
+            action: keep
+    additionalScrapeConfigs:
+      - job_name: istiod
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - istio-system
+        relabel_configs:
+          - source_labels:
+              - __meta_kubernetes_service_name
+              - __meta_kubernetes_endpoint_port_name
+            action: keep
+            regex: istiod;http-monitoring
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - source_labels:
+              - __meta_kubernetes_namespace
+            target_label: namespace
+          - source_labels:
+              - __meta_kubernetes_service_name
+            target_label: service
+      - job_name: istio-envoy
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels:
+              - __meta_kubernetes_pod_container_name
+            action: keep
+            regex: istio-proxy
+          - source_labels:
+              - __address__
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:15090
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels:
+              - __meta_kubernetes_namespace
+            target_label: namespace
+          - source_labels:
+              - __meta_kubernetes_pod_name
+            target_label: pod
+          - source_labels:
+              - __meta_kubernetes_pod_node_name
+            target_label: node
+
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - nodes=[*]
+    - pods=[*]
+    - deployments=[*]
+    - horizontalpodautoscalers=[*]
+
+# TODO: move this remote_write endpoint behind private connectivity once I stop treating the cross-cloud path like a lab.
+prometheus-node-exporter:
+  extraArgs:
+    - --collector.systemd
