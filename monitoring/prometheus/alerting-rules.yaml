@@ -1,0 +1,71 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-recording-rules
+  namespace: monitoring
+  labels:
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  groups:
+    - name: mcplatform-app-recording
+      interval: 30s
+      rules:
+        - record: mcplatform:service_requests:rate5m
+          expr: |
+            sum by (service, route, status_code) (
+              rate(mcplatform_http_requests_total[5m])
+            )
+        - record: mcplatform:service_error_rate:ratio5m
+          expr: |
+            sum by (service) (
+              rate(mcplatform_http_requests_total{status_code=~"5.."}[5m])
+            )
+            /
+            clamp_min(
+              sum by (service) (
+                rate(mcplatform_http_requests_total[5m])
+              ),
+              0.001
+            )
+        - record: mcplatform:service_latency_p95:5m
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (service, le) (
+                rate(mcplatform_http_request_duration_seconds_bucket[5m])
+              )
+            )
+    - name: mcplatform-mesh-recording
+      interval: 30s
+      rules:
+        - record: istio:service_requests:rate5m
+          expr: |
+            sum by (destination_service_name, response_code, connection_security_policy, source_cluster, destination_cluster) (
+              rate(istio_requests_total{reporter="destination"}[5m])
+            )
+        - record: istio:service_error_rate:ratio5m
+          expr: |
+            sum by (destination_service_name) (
+              rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m])
+            )
+            /
+            clamp_min(
+              sum by (destination_service_name) (
+                rate(istio_requests_total{reporter="destination"}[5m])
+              ),
+              0.001
+            )
+        - record: istio:cross_cluster_requests:rate5m
+          expr: |
+            sum by (source_cluster, destination_cluster, destination_service_name) (
+              rate(
+                istio_requests_total{
+                  reporter="source",
+                  source_cluster!="",
+                  destination_cluster!="",
+                  source_cluster!="destination_cluster"
+                }[5m]
+              )
+            )

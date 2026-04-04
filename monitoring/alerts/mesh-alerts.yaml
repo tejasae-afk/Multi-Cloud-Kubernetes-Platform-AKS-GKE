@@ -1,0 +1,47 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mesh-alerts
+  namespace: monitoring
+  labels:
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  groups:
+    - name: mesh-alerts
+      rules:
+        - alert: MeshErrorRateHigh
+          expr: |
+            max(istio:service_error_rate:ratio5m) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: mesh error rate is high
+            description: "At least one service stayed above a 5 percent 5xx rate for 5 minutes."
+        - alert: MeshMtlsDrift
+          expr: |
+            sum(
+              rate(
+                istio_requests_total{
+                  reporter="destination",
+                  connection_security_policy=~"none|unknown"
+                }[5m]
+              )
+            ) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: mesh traffic without mTLS
+            description: "Istio saw service traffic without mutual TLS for 10 minutes."
+        - alert: CrossClusterConnectivityLoss
+          expr: |
+            sum(istio:cross_cluster_requests:rate5m) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: cross-cluster traffic disappeared
+            description: "No cross-cluster mesh traffic showed up for 15 minutes."

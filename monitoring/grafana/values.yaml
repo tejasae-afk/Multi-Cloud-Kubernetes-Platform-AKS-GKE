@@ -1,0 +1,80 @@
+fullnameOverride: central-grafana
+
+commonLabels:
+  project: multi-cloud-k8s
+  environment: dev
+  managed-by: helm
+
+testFramework:
+  enabled: false
+
+adminUser: admin
+adminPassword: admin
+
+service:
+  type: ClusterIP
+  port: 80
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+grafana.ini:
+  server:
+    root_url: http://127.0.0.1:3000
+  users:
+    viewers_can_edit: false
+  auth.anonymous:
+    enabled: false
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: platform
+        orgId: 1
+        folder: platform
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/platform
+
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: monitoring
+    folder: /var/lib/grafana/dashboards/platform
+    provider:
+      name: platform
+      orgid: 1
+      folder: platform
+      type: file
+      disableDelete: false
+      allowUiUpdates: true
+      foldersFromFilesStructure: false
+  datasources:
+    enabled: true
+    label: grafana_datasource
+    labelValue: "1"
+    searchNamespace: monitoring
+
+serviceAccount:
+  create: true
+  automountServiceAccountToken: true
+
+env:
+  GF_EXPLORE_ENABLED: "true"
+  GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/platform/multi-cluster-overview.json
+
+# TODO: swap admin/admin for a secret before I let anyone else log into this cluster.

@@ -1,0 +1,130 @@
+fullnameOverride: mc-kps-gke
+
+commonLabels:
+  project: multi-cloud-k8s
+  environment: dev
+  managed-by: helm
+
+defaultRules:
+  create: true
+
+grafana:
+  # I keep Grafana separate so I only have one central release to babysit.
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+prometheusOperator:
+  tls:
+    enabled: true
+
+prometheus:
+  thanosService:
+    enabled: true
+  thanosServiceMonitor:
+    enabled: true
+  service:
+    type: ClusterIP
+  prometheusSpec:
+    externalLabels:
+      cluster: gke
+      region: us-central1
+      platform: multi-cloud-k8s
+    retention: 7d
+    scrapeInterval: 15s
+    evaluationInterval: 30s
+    walCompression: true
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+    enableAdminAPI: false
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 30Gi
+    thanos:
+      baseImage: quay.io/thanos/thanos
+      version: v0.40.1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    additionalScrapeConfigs:
+      - job_name: istiod
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - istio-system
+        relabel_configs:
+          - source_labels:
+              - __meta_kubernetes_service_name
+              - __meta_kubernetes_endpoint_port_name
+            action: keep
+            regex: istiod;http-monitoring
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - source_labels:
+              - __meta_kubernetes_namespace
+            target_label: namespace
+          - source_labels:
+              - __meta_kubernetes_service_name
+            target_label: service
+      - job_name: istio-envoy
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels:
+              - __meta_kubernetes_pod_container_name
+            action: keep
+            regex: istio-proxy
+          - source_labels:
+              - __address__
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:15090
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels:
+              - __meta_kubernetes_namespace
+            target_label: namespace
+          - source_labels:
+              - __meta_kubernetes_pod_name
+            target_label: pod
+          - source_labels:
+              - __meta_kubernetes_pod_node_name
+            target_label: node
+
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - nodes=[*]
+    - pods=[*]
+    - deployments=[*]
+    - horizontalpodautoscalers=[*]
+
+prometheus-node-exporter:
+  extraArgs:
+    - --collector.systemd
+
