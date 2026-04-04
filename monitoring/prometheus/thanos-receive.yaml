@@ -1,0 +1,300 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: thanos-receive-hashring
+  namespace: monitoring
+  labels:
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+data:
+  hashring.json: |
+    [
+      {
+        "hashring": "default",
+        "endpoints": [
+          "127.0.0.1:10901"
+        ]
+      }
+    ]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: thanos-receive-nginx
+  namespace: monitoring
+  labels:
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+data:
+  default.conf: |
+    server {
+      listen 10908;
+      server_name _;
+      client_max_body_size 32m;
+
+      location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+      }
+
+      location /api/v1/receive {
+        auth_basic "thanos receive";
+        auth_basic_user_file /etc/nginx/auth/auth;
+        proxy_pass http://127.0.0.1:19291$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: thanos-receive-data
+  namespace: monitoring
+  labels:
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-receive
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: thanos-receive
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-receive
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thanos-receive
+        project: multi-cloud-k8s
+        environment: dev
+        managed-by: manifests
+    spec:
+      containers:
+        - name: thanos
+          image: quay.io/thanos/thanos:v0.40.1
+          args:
+            - receive
+            - --log.level=info
+            - --grpc-address=0.0.0.0:10901
+            - --http-address=0.0.0.0:10902
+            - --remote-write.address=0.0.0.0:19291
+            - --receive.hashrings-file=/etc/thanos/hashring/hashring.json
+            - --receive.hashrings-algorithm=ketama
+            - --receive.local-endpoint=127.0.0.1:10901
+            - --tsdb.path=/var/thanos/receive
+          ports:
+            - name: grpc
+              containerPort: 10901
+            - name: http
+              containerPort: 10902
+            - name: remote-write
+              containerPort: 19291
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - name: receive-data
+              mountPath: /var/thanos/receive
+            - name: hashring
+              mountPath: /etc/thanos/hashring
+              readOnly: true
+        - name: nginx
+          image: nginx:1.27.4-alpine
+          ports:
+            - name: remote-public
+              containerPort: 10908
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: remote-public
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: remote-public
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: basic-auth
+              mountPath: /etc/nginx/auth
+              readOnly: true
+      volumes:
+        - name: receive-data
+          persistentVolumeClaim:
+            claimName: thanos-receive-data
+        - name: hashring
+          configMap:
+            name: thanos-receive-hashring
+        - name: nginx-config
+          configMap:
+            name: thanos-receive-nginx
+        - name: basic-auth
+          secret:
+            secretName: thanos-receive-basic-auth
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-receive
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: thanos-receive
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  selector:
+    app.kubernetes.io/name: thanos-receive
+  ports:
+    - name: grpc
+      port: 10901
+      targetPort: grpc
+    - name: http
+      port: 10902
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-receive-public
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: thanos-receive
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: thanos-receive
+  ports:
+    - name: remote-write
+      port: 10908
+      targetPort: remote-public
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-query
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: thanos-query
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-query
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thanos-query
+        project: multi-cloud-k8s
+        environment: dev
+        managed-by: manifests
+    spec:
+      containers:
+        - name: thanos
+          # I keep Query next to Receive because Grafana wants the Prometheus query API, not StoreAPI.
+          image: quay.io/thanos/thanos:v0.40.1
+          args:
+            - query
+            - --log.level=info
+            - --http-address=0.0.0.0:9090
+            - --grpc-address=0.0.0.0:10903
+            - --query.replica-label=prometheus_replica
+            - --store=dnssrv+_grpc._tcp.mc-kps-gke-thanos-discovery.monitoring.svc.cluster.local
+            - --store=thanos-receive.monitoring.svc.cluster.local:10901
+          ports:
+            - name: http
+              containerPort: 9090
+            - name: grpc
+              containerPort: 10903
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-query
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: thanos-query
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  selector:
+    app.kubernetes.io/name: thanos-query
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+    - name: grpc
+      port: 10903
+      targetPort: grpc
