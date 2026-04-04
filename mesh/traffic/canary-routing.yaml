@@ -1,0 +1,37 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: api-gateway-route
+  namespace: platform
+spec:
+  hosts:
+    - api.platform.local
+  gateways:
+    - platform/public-api
+  http:
+    - name: header-force-aks
+      match:
+        - headers:
+            x-route-to:
+              exact: aks
+      route:
+        - destination:
+            host: api-gateway.platform.svc.cluster.local
+            subset: aks
+            port:
+              number: 8080
+          weight: 100
+    - name: weighted-cross-cloud
+      route:
+        - destination:
+            host: api-gateway.platform.svc.cluster.local
+            subset: gke
+            port:
+              number: 8080
+          weight: 70
+        - destination:
+            host: api-gateway.platform.svc.cluster.local
+            subset: aks
+            port:
+              number: 8080
+          weight: 30

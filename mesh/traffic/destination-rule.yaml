@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: api-gateway-cluster-policy
+  namespace: platform
+spec:
+  host: api-gateway.platform.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http2MaxRequests: 1000
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+  subsets:
+    - name: gke
+      labels:
+        topology.istio.io/cluster: cluster1
+    - name: aks
+      labels:
+        topology.istio.io/cluster: cluster2
