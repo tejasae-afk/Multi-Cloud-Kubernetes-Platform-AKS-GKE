@@ -1,0 +1,100 @@
+name: setup-kubeconfig
+description: Set GKE and AKS kubeconfig contexts with OIDC auth.
+
+inputs:
+  gcp-project-id:
+    description: Google Cloud project ID.
+    required: true
+  gcp-wif-provider:
+    description: Full Workload Identity Provider resource name.
+    required: true
+  gcp-service-account:
+    description: Google service account email used by GitHub Actions.
+    required: true
+  gke-cluster-name:
+    description: GKE cluster name.
+    required: true
+  gke-location:
+    description: GKE region or zone.
+    required: true
+  gke-use-internal-ip:
+    description: Use the internal GKE API endpoint.
+    required: false
+    default: "true"
+  gke-use-connect-gateway:
+    description: Use Connect Gateway for GKE auth.
+    required: false
+    default: "false"
+  azure-client-id:
+    description: Azure managed identity client ID.
+    required: true
+  azure-tenant-id:
+    description: Azure tenant ID.
+    required: true
+  azure-subscription-id:
+    description: Azure subscription ID.
+    required: true
+  aks-resource-group:
+    description: AKS resource group.
+    required: true
+  aks-cluster-name:
+    description: AKS cluster name.
+    required: true
+  aks-admin:
+    description: Get admin credentials for AKS.
+    required: false
+    default: "false"
+  kubelogin-version:
+    description: kubelogin version to install.
+    required: false
+    default: "v0.2.12"
+
+runs:
+  using: composite
+  steps:
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        project_id: ${{ inputs.gcp-project-id }}
+        workload_identity_provider: ${{ inputs.gcp-wif-provider }}
+        service_account: ${{ inputs.gcp-service-account }}
+
+    - name: Get GKE credentials
+      uses: google-github-actions/get-gke-credentials@v3
+      with:
+        cluster_name: ${{ inputs.gke-cluster-name }}
+        location: ${{ inputs.gke-location }}
+        context_name: gke
+        use_internal_ip: ${{ inputs.gke-use-internal-ip }}
+        use_connect_gateway: ${{ inputs.gke-use-connect-gateway }}
+
+    - name: Authenticate to Azure
+      uses: azure/login@v2.3.0
+      with:
+        client-id: ${{ inputs.azure-client-id }}
+        tenant-id: ${{ inputs.azure-tenant-id }}
+        subscription-id: ${{ inputs.azure-subscription-id }}
+
+    - name: Install kubelogin
+      uses: azure/use-kubelogin@v1.2
+      with:
+        kubelogin-version: ${{ inputs.kubelogin-version }}
+
+    - name: Get AKS credentials
+      uses: azure/aks-set-context@v4
+      with:
+        resource-group: ${{ inputs.aks-resource-group }}
+        cluster-name: ${{ inputs.aks-cluster-name }}
+        admin: ${{ inputs.aks-admin }}
+        use-kubelogin: "true"
+
+    - name: Rename AKS context
+      shell: bash
+      run: |
+        set -euo pipefail
+        current="$(kubectl config current-context)"
+        if [[ "${current}" != "aks" ]]; then
+          kubectl config rename-context "${current}" aks >/dev/null 2>&1 || true
+        fi
+        kubectl config use-context gke >/dev/null
+        kubectl config get-contexts
