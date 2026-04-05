@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mesh-connectivity-check
+  namespace: platform
+  labels:
+    app: mesh-connectivity-check
+    version: v1
+spec:
+  schedule: "*/5 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: mesh-connectivity-check
+            version: v1
+          annotations:
+            sidecar.istio.io/inject: "true"
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: curl
+              image: curlimages/curl:8.12.1
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+                  mesh_code="$(curl -sS -o /dev/null -w '%{http_code}' http://order-service.platform.svc.cluster.local:8081/orders)"
+                  remote_code="$(curl -ksS -o /dev/null -w '%{http_code}' -H 'x-route-to: aks' https://api.platform.haleops.net/api/health)"
+                  echo "${ts} mesh=${mesh_code} forced_aks=${remote_code}"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
