@@ -1,0 +1,171 @@
+name: terraform-plan
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "routing/traffic-manager/**"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: terraform-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+  TF_VAR_gcp_region: ${{ vars.GKE_LOCATION }}
+  TF_VAR_gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+  TF_VAR_azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+  TF_VAR_aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+  TF_VAR_aks_resource_group_name: ${{ vars.AKS_RESOURCE_GROUP }}
+  TF_VAR_dns_zone_name: ${{ vars.DNS_ZONE_NAME }}
+  TF_VAR_resource_group_name: ${{ vars.ROUTING_RESOURCE_GROUP }}
+  TF_VAR_profile_relative_name: ${{ vars.TRAFFIC_MANAGER_RELATIVE_NAME }}
+  TF_VAR_shared_hostname: ${{ vars.APP_FQDN }}
+  TF_VAR_gke_endpoint_fqdn: ${{ vars.GKE_APP_FQDN }}
+  TF_VAR_aks_endpoint_fqdn: ${{ vars.AKS_APP_FQDN }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to Azure
+        uses: azure/login@v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3.1.2
+
+      - name: Root terraform plan
+        id: root_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd terraform
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${{ vars.TF_STATE_PREFIX }}"
+          terraform fmt -check -recursive
+          terraform validate -no-color
+
+          set +e
+          terraform plan -detailed-exitcode -no-color -out=tfplan > root-plan.txt 2>&1
+          code=$?
+          set -e
+
+          {
+            echo "code=${code}"
+            echo "snippet<<EOF"
+            sed -n '1,250p' root-plan.txt
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Routing terraform plan
+        id: routing_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd routing/traffic-manager
+          terraform init
+          terraform fmt -check
+          terraform validate -no-color
+
+          set +e
+          terraform plan -detailed-exitcode -no-color -out=tfplan > routing-plan.txt 2>&1
+          code=$?
+          set -e
+
+          {
+            echo "code=${code}"
+            echo "snippet<<EOF"
+            sed -n '1,250p' routing-plan.txt
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v8
+        env:
+          ROOT_CODE: ${{ steps.root_plan.outputs.code }}
+          ROOT_SNIPPET: ${{ steps.root_plan.outputs.snippet }}
+          ROUTING_CODE: ${{ steps.routing_plan.outputs.code }}
+          ROUTING_SNIPPET: ${{ steps.routing_plan.outputs.snippet }}
+        with:
+          script: |
+            const marker = "<!-- terraform-plan-comment -->";
+            const rootCode = process.env.ROOT_CODE || "1";
+            const routingCode = process.env.ROUTING_CODE || "1";
+
+            const statusFor = (code) => {
+              if (code === "0") return "no changes";
+              if (code === "2") return "changes pending";
+              return "failed";
+            };
+
+            const body = `${marker}
+            ## Terraform plan
+
+            **Root stack:** ${statusFor(rootCode)}
+            \`\`\`
+            ${process.env.ROOT_SNIPPET || "no output"}
+            \`\`\`
+
+            **Routing stack:** ${statusFor(routingCode)}
+            \`\`\`
+            ${process.env.ROUTING_SNIPPET || "no output"}
+            \`\`\`
+            `;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+            });
+
+            const existing = comments.find((comment) => comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+      - name: Fail when plan errored
+        if: steps.root_plan.outputs.code == '1' || steps.routing_plan.outputs.code == '1'
+        shell: bash
+        run: exit 1
+

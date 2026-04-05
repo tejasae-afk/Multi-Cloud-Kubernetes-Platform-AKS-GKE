@@ -1,0 +1,203 @@
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Container tag to deploy. Empty means the current commit SHA."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
+  APP_NAMESPACE: platform
+
+# GKE is private in this repo, so deploy jobs stay on a runner that can reach the cluster network.
+jobs:
+  deploy-gke:
+    runs-on:
+      - self-hosted
+      - platform
+      - linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig contexts
+        uses: ./.github/actions/setup-kubeconfig
+        with:
+          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke-location: ${{ vars.GKE_LOCATION }}
+          gke-use-internal-ip: "true"
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Write GKE image overrides
+        shell: bash
+        run: |
+          cat > /tmp/platform-images-gke.yaml <<EOF
+          api-gateway:
+            image:
+              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/api-gateway
+              tag: "${IMAGE_TAG}"
+          order-service:
+            image:
+              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/order-service
+              tag: "${IMAGE_TAG}"
+          inventory-service:
+            image:
+              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/inventory-service
+              tag: "${IMAGE_TAG}"
+          EOF
+
+      - name: Deploy to GKE
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm upgrade --install platform ./helm \
+            --namespace "${APP_NAMESPACE}" \
+            --create-namespace \
+            --kube-context gke \
+            -f helm/values.yaml \
+            -f helm/values-gke.yaml \
+            -f /tmp/platform-images-gke.yaml
+
+  smoke-gke:
+    needs: deploy-gke
+    runs-on:
+      - self-hosted
+      - platform
+      - linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig contexts
+        uses: ./.github/actions/setup-kubeconfig
+        with:
+          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke-location: ${{ vars.GKE_LOCATION }}
+          gke-use-internal-ip: "true"
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Smoke test GKE
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tests/smoke/test_endpoints.sh --context gke --namespace platform --base-url "https://${{ vars.GKE_APP_FQDN }}"
+          ./tests/smoke/test_metrics.sh --context gke --monitoring-namespace monitoring
+
+  deploy-aks:
+    needs: smoke-gke
+    runs-on:
+      - self-hosted
+      - platform
+      - linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig contexts
+        uses: ./.github/actions/setup-kubeconfig
+        with:
+          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke-location: ${{ vars.GKE_LOCATION }}
+          gke-use-internal-ip: "true"
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Write AKS image overrides
+        shell: bash
+        run: |
+          cat > /tmp/platform-images-aks.yaml <<EOF
+          api-gateway:
+            image:
+              repository: ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/api-gateway
+              tag: "${IMAGE_TAG}"
+          order-service:
+            image:
+              repository: ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/order-service
+              tag: "${IMAGE_TAG}"
+          inventory-service:
+            image:
+              repository: ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/inventory-service
+              tag: "${IMAGE_TAG}"
+          EOF
+
+      - name: Deploy to AKS
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm upgrade --install platform ./helm \
+            --namespace "${APP_NAMESPACE}" \
+            --create-namespace \
+            --kube-context aks \
+            -f helm/values.yaml \
+            -f helm/values-aks.yaml \
+            -f /tmp/platform-images-aks.yaml
+
+  smoke-aks:
+    needs: deploy-aks
+    runs-on:
+      - self-hosted
+      - platform
+      - linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig contexts
+        uses: ./.github/actions/setup-kubeconfig
+        with:
+          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke-location: ${{ vars.GKE_LOCATION }}
+          gke-use-internal-ip: "true"
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Smoke test AKS
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tests/smoke/test_endpoints.sh --context aks --namespace platform --base-url "https://${{ vars.AKS_APP_FQDN }}"
+          # Monitoring stays on GKE, so I only verify the shared stack from there.
+          ./tests/smoke/test_metrics.sh --context gke --monitoring-namespace monitoring

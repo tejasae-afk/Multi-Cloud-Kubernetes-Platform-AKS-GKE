@@ -1,0 +1,64 @@
+fullnameOverride: external-dns
+
+provider:
+  name: google
+
+sources:
+  - service
+  - istio-gateway
+  - istio-virtualservice
+
+domainFilters:
+  - platform.haleops.net
+
+registry: txt
+txtOwnerId: mc-k8s-gke
+txtPrefix: txt-
+policy: upsert-only
+interval: 30s
+triggerLoopOnEvent: true
+logLevel: info
+logFormat: json
+
+serviceAccount:
+  create: true
+  name: external-dns
+  annotations:
+    iam.gke.io/gcp-service-account: external-dns@multi-cloud-k8s.iam.gserviceaccount.com
+
+podLabels:
+  platform.haleops.net/cluster: gke
+
+nodeSelector:
+  iam.gke.io/gke-metadata-server-enabled: "true"
+
+extraArgs:
+  - --google-project=multi-cloud-k8s
+  - --annotation-filter=external-dns.alpha.kubernetes.io/public in (true)
+  - --events
+  - --txt-cache-interval=1m
+
+rbac:
+  create: true
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  additionalLabels:
+    release: kube-prometheus-stack
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: external-dns
