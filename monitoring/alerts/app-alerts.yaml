@@ -1,0 +1,40 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app-alerts
+  namespace: monitoring
+  labels:
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: manifests
+spec:
+  groups:
+    - name: app-alerts
+      rules:
+        - alert: OrderServiceLatencyP99High
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (
+                rate(
+                  mcplatform_http_request_duration_seconds_bucket{
+                    service="order-service"
+                  }[5m]
+                )
+              )
+            ) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: order-service p99 latency is high
+            description: "order-service stayed above 2 seconds p99 latency for 10 minutes."
+        - alert: OrderServiceErrorRateHigh
+          expr: |
+            mcplatform:service_error_rate:ratio5m{service="order-service"} > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: order-service error rate is high
+            description: "order-service stayed above a 5 percent 5xx rate for 5 minutes."
