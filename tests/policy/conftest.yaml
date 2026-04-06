@@ -1,0 +1,10 @@
+# I keep this as repo metadata for CI wrappers.
+# Conftest itself still wants conftest.toml when you use its native config file path.
+policyDir: tests/policy/opa-policies
+namespace: main
+output: github
+files:
+  - helm/**/*.yaml
+  - mesh/**/*.yaml
+  - monitoring/**/*.yaml
+  - routing/**/*.yaml
