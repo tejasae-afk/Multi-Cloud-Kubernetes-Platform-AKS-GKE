@@ -1,0 +1,111 @@
+name: nightly-tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: nightly-tests
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on:
+      - self-hosted
+      - platform
+      - linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig contexts
+        uses: ./.github/actions/setup-kubeconfig
+        with:
+          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke-location: ${{ vars.GKE_LOCATION }}
+          gke-use-internal-ip: "true"
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tests/smoke/test_endpoints.sh \
+            --context gke \
+            --namespace platform \
+            --base-url "https://${{ vars.GKE_APP_FQDN }}"
+          ./tests/smoke/test_endpoints.sh \
+            --context aks \
+            --namespace platform \
+            --base-url "https://${{ vars.AKS_APP_FQDN }}"
+          ./tests/smoke/test_metrics.sh \
+            --context gke \
+            --monitoring-namespace monitoring
+
+      - name: Integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tests/integration/test_cross_cluster.sh \
+            --shared-url "https://${{ vars.APP_FQDN }}" \
+            --gke-url "https://${{ vars.GKE_APP_FQDN }}" \
+            --aks-url "https://${{ vars.AKS_APP_FQDN }}"
+          ./tests/integration/test_mesh_routing.sh \
+            --shared-url "https://${{ vars.APP_FQDN }}/api/health" \
+            --gke-host "${{ vars.GKE_APP_FQDN }}" \
+            --aks-host "${{ vars.AKS_APP_FQDN }}"
+
+      - name: Mesh verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./mesh/scripts/verify-mesh.sh
+          ./mesh/scripts/debug-mesh.sh > nightly-mesh-debug.txt || true
+
+      - name: Failover test
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHARED_URL="https://${{ vars.APP_FQDN }}/api/health" \
+          GKE_HOST="${{ vars.GKE_APP_FQDN }}" \
+          AKS_HOST="${{ vars.AKS_APP_FQDN }}" \
+          ./routing/scripts/test-failover.sh
+
+      - name: Load test
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_URL="https://${{ vars.APP_FQDN }}" ./tests/load/run-load-test.sh
+
+      - name: Policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            openpolicyagent/conftest:v0.66.0 \
+            test -p tests/policy/opa-policies \
+            helm mesh routing monitoring
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-test-artifacts
+          path: |
+            nightly-mesh-debug.txt
+            tests/load/results
