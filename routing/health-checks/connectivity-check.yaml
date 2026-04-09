@@ -4,19 +4,21 @@ metadata:
   name: mesh-connectivity-check
   namespace: platform
   labels:
-    app: mesh-connectivity-check
-    version: v1
+    app.kubernetes.io/name: mesh-connectivity-check
+    app.kubernetes.io/part-of: multi-cloud-k8s
 spec:
   schedule: "*/5 * * * *"
-  successfulJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      backoffLimit: 1
       template:
         metadata:
           labels:
-            app: mesh-connectivity-check
-            version: v1
+            app.kubernetes.io/name: mesh-connectivity-check
+            app.kubernetes.io/part-of: multi-cloud-k8s
           annotations:
             sidecar.istio.io/inject: "true"
         spec:
@@ -29,15 +31,17 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  set -eu
-                  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-                  mesh_code="$(curl -sS -o /dev/null -w '%{http_code}' http://order-service.platform.svc.cluster.local:8081/orders)"
-                  remote_code="$(curl -ksS -o /dev/null -w '%{http_code}' -H 'x-route-to: aks' https://api.platform.haleops.net/api/health)"
-                  echo "${ts} mesh=${mesh_code} forced_aks=${remote_code}"
+                  set -euo pipefail
+                  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  echo "starting mesh connectivity check at ${started_at}"
+                  curl -fsS http://istio-ingressgateway.istio-system.svc.cluster.local/api/health                     -H "Host: api.platform.example.com" >/tmp/api.json
+                  curl -fsS http://istio-ingressgateway.istio-system.svc.cluster.local/api/orders                     -H "Host: api.platform.example.com"                     -H "x-route-to: aks" >/tmp/orders.json
+                  echo "api ok: $(wc -c </tmp/api.json) bytes"
+                  echo "orders via aks ok: $(wc -c </tmp/orders.json) bytes"
               resources:
                 requests:
-                  cpu: 10m
+                  cpu: 20m
                   memory: 32Mi
                 limits:
                   cpu: 100m
-                  memory: 64Mi
+                  memory: 128Mi

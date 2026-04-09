@@ -1,120 +1,102 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RED=$'\033[31m'
-GREEN=$'\033[32m'
-YELLOW=$'\033[33m'
-BLUE=$'\033[34m'
-RESET=$'\033[0m'
-
-URL="${1:-https://api.platform.haleops.net/healthz}"
+HOST="${HOST:-}"
+SCHEME="${SCHEME:-https}"
+PATH_VALUE="${PATH_VALUE:-/healthz}"
 COUNT="${COUNT:-0}"
-INTERVAL="${INTERVAL:-5}"
-LOG_FILE="${LOG_FILE:-routing/health-checks/synthetic-monitor.log}"
+INTERVAL_SECONDS="${INTERVAL_SECONDS:-30}"
+OUTPUT_FILE="${OUTPUT_FILE:-routing/health-checks/synthetic-monitor.log}"
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-5}"
+MAX_TIME="${MAX_TIME:-10}"
 
 usage() {
-  cat <<EOF
+  cat <<USAGE
 Usage:
-  ./routing/health-checks/synthetic-monitor.sh [url]
+  $(basename "$0") --host <hostname> [--scheme http|https] [--path /healthz] [--count N] [--interval 30] [--output file]
 
-Environment:
-  COUNT=0        run forever when set to 0
-  INTERVAL=5     seconds between probes
-  LOG_FILE=...   append CSV-style output here
-
-Output columns:
-  timestamp,status,latency_ms,remote_ip,served_by,resolved
-EOF
+Notes:
+  count=0 means run forever.
+USAGE
 }
 
-if [[ "${URL}" == "--help" || "${URL}" == "-h" ]]; then
-  usage
-  exit 0
+while (($#)); do
+  case "$1" in
+    --host)
+      HOST="$2"
+      shift 2
+      ;;
+    --scheme)
+      SCHEME="$2"
+      shift 2
+      ;;
+    --path)
+      PATH_VALUE="$2"
+      shift 2
+      ;;
+    --count)
+      COUNT="$2"
+      shift 2
+      ;;
+    --interval)
+      INTERVAL_SECONDS="$2"
+      shift 2
+      ;;
+    --output)
+      OUTPUT_FILE="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown flag: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+[[ -n "$HOST" ]] || { echo "--host is required" >&2; exit 1; }
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+if [[ ! -f "$OUTPUT_FILE" ]]; then
+  echo "timestamp,host,resolved,status_code,latency_ms,served_by" >> "$OUTPUT_FILE"
 fi
 
-mkdir -p "$(dirname "${LOG_FILE}")"
-
-resolve_target() {
-  local host
-  host="$(python3 - <<'PY' "$1"
-import sys
-from urllib.parse import urlparse
-print(urlparse(sys.argv[1]).hostname or sys.argv[1])
-PY
-)"
-
-  if command -v dig >/dev/null 2>&1; then
-    dig +short "${host}" | paste -sd'|' -
-  elif command -v getent >/dev/null 2>&1; then
-    getent ahostsv4 "${host}" | awk '{print $1}' | sort -u | paste -sd'|' -
-  else
-    printf "n/a"
-  fi
-}
-
-probe_once() {
-  local ts headers body result http_code total_time remote_ip served_by resolved
-  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+run_once() {
+  local timestamp resolved headers body metrics status_code latency served_by
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  resolved="$(dig +short "$HOST" | paste -sd ';' -)"
   headers="$(mktemp)"
   body="$(mktemp)"
-  trap 'rm -f "${headers}" "${body}"' RETURN
 
-  result="$(curl -ksS -o "${body}" -D "${headers}" \
-    --max-time 10 \
-    --connect-timeout 5 \
-    -w '%{http_code}|%{time_total}|%{remote_ip}' \
-    "${URL}" || true)"
+  metrics="$(curl -sS -D "$headers" -o "$body" -w '%{http_code} %{time_total}' \
+    --connect-timeout "$CONNECT_TIMEOUT" \
+    --max-time "$MAX_TIME" \
+    "${SCHEME}://${HOST}${PATH_VALUE}" || true)"
 
-  http_code="${result%%|*}"
-  result="${result#*|}"
-  total_time="${result%%|*}"
-  remote_ip="${result##*|}"
-  served_by="$(awk -F': ' 'tolower($1)=="x-served-by" {gsub("\r","",$2); print $2}' "${headers}" | tail -n1)"
-  resolved="$(resolve_target "${URL}")"
+  status_code="$(awk '{print $1}' <<<"$metrics")"
+  latency="$(awk '{print $2 * 1000}' <<<"$metrics" 2>/dev/null || echo 0)"
+  served_by="$(awk -F': ' 'tolower($1)=="x-served-by" {print $2}' "$headers" | tr -d '\r' | tail -n1)"
 
-  if [[ -z "${served_by}" ]]; then
+  if [[ -z "$served_by" ]]; then
     served_by="unknown"
   fi
 
-  # echo "DEBUG: ${http_code}|${total_time}|${remote_ip}|${served_by}"
+  printf '%s,%s,%s,%s,%s,%s\n' "$timestamp" "$HOST" "$resolved" "$status_code" "$latency" "$served_by" | tee -a "$OUTPUT_FILE"
+  # echo "debug: $(cat "$headers")"
 
-  printf '%s,%s,%s,%s,%s,%s\n' \
-    "${ts}" \
-    "${http_code}" \
-    "$(python3 - <<'PY' "$total_time"
-import sys
-print(int(float(sys.argv[1]) * 1000))
-PY
-)" \
-    "${remote_ip}" \
-    "${served_by}" \
-    "${resolved}" | tee -a "${LOG_FILE}"
-
-  if [[ "${http_code}" == "200" ]]; then
-    printf '%s[%s] %s -> %sms via %s (%s)%s\n' \
-      "${GREEN}" "${ts}" "${URL}" \
-      "$(python3 - <<'PY' "$total_time"
-import sys
-print(int(float(sys.argv[1]) * 1000))
-PY
-)" \
-      "${remote_ip}" \
-      "${served_by}" \
-      "${RESET}"
-  else
-    printf '%s[%s] %s -> status %s via %s (%s)%s\n' \
-      "${YELLOW}" "${ts}" "${URL}" "${http_code}" "${remote_ip}" "${served_by}" "${RESET}"
-  fi
+  rm -f "$headers" "$body"
 }
 
 iteration=0
 while true; do
-  probe_once
+  run_once
   iteration=$((iteration + 1))
-
-  if [[ "${COUNT}" -gt 0 && "${iteration}" -ge "${COUNT}" ]]; then
+  if (( COUNT > 0 && iteration >= COUNT )); then
     break
   fi
-
-  sleep "${INTERVAL}"
+  sleep "$INTERVAL_SECONDS"
 done
