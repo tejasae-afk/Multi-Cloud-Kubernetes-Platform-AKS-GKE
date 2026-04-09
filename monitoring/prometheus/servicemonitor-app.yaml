@@ -4,20 +4,21 @@ metadata:
   name: api-gateway
   namespace: monitoring
   labels:
+    release: mc-monitoring
     project: multi-cloud-k8s
     environment: dev
-    managed-by: manifests
+    managed-by: kubectl
 spec:
-  jobLabel: "app.kubernetes.io/name"
   namespaceSelector:
-    any: true
+    matchNames:
+      - platform
   selector:
     matchLabels:
       app.kubernetes.io/name: api-gateway
   endpoints:
     - port: http-metrics
       path: /metrics
-      interval: 15s
+      interval: 30s
       scrapeTimeout: 10s
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -26,20 +27,21 @@ metadata:
   name: order-service
   namespace: monitoring
   labels:
+    release: mc-monitoring
     project: multi-cloud-k8s
     environment: dev
-    managed-by: manifests
+    managed-by: kubectl
 spec:
-  jobLabel: "app.kubernetes.io/name"
   namespaceSelector:
-    any: true
+    matchNames:
+      - platform
   selector:
     matchLabels:
       app.kubernetes.io/name: order-service
   endpoints:
     - port: http-metrics
       path: /metrics
-      interval: 15s
+      interval: 30s
       scrapeTimeout: 10s
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -48,18 +50,19 @@ metadata:
   name: inventory-service
   namespace: monitoring
   labels:
+    release: mc-monitoring
     project: multi-cloud-k8s
     environment: dev
-    managed-by: manifests
+    managed-by: kubectl
 spec:
-  jobLabel: "app.kubernetes.io/name"
   namespaceSelector:
-    any: true
+    matchNames:
+      - platform
   selector:
     matchLabels:
       app.kubernetes.io/name: inventory-service
   endpoints:
     - port: http-metrics
       path: /metrics
-      interval: 15s
+      interval: 30s
       scrapeTimeout: 10s

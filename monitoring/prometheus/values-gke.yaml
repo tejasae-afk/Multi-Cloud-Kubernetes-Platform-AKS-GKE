@@ -1,23 +1,39 @@
-fullnameOverride: mc-kps-gke
-
 commonLabels:
   project: multi-cloud-k8s
   environment: dev
   managed-by: helm
 
-defaultRules:
-  create: true
+fullnameOverride: mc-monitoring-gke
 
 grafana:
-  # I keep Grafana separate so I only have one central release to babysit.
   enabled: false
+
+kubeEtcd:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeScheduler: false
 
 alertmanager:
-  enabled: false
-
-prometheusOperator:
-  tls:
-    enabled: true
+  enabled: true
+  alertmanagerSpec:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
 prometheus:
   thanosService:
@@ -27,24 +43,27 @@ prometheus:
   service:
     type: ClusterIP
   prometheusSpec:
+    replicas: 1
+    retention: 7d
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    enableAdminAPI: true
     externalLabels:
       cluster: gke
-      region: us-central1
-      platform: multi-cloud-k8s
-    retention: 7d
-    scrapeInterval: 15s
-    evaluationInterval: 30s
-    walCompression: true
+      environment: dev
+      project: multi-cloud-k8s
+    serviceMonitorSelector:
+      matchLabels:
+        release: mc-monitoring
     serviceMonitorSelectorNilUsesHelmValues: false
-    serviceMonitorSelector: {}
     serviceMonitorNamespaceSelector: {}
     podMonitorSelectorNilUsesHelmValues: false
-    podMonitorSelector: {}
     podMonitorNamespaceSelector: {}
+    ruleSelector:
+      matchLabels:
+        release: mc-monitoring
     ruleSelectorNilUsesHelmValues: false
-    ruleSelector: {}
     ruleNamespaceSelector: {}
-    enableAdminAPI: false
     resources:
       requests:
         cpu: 500m
@@ -59,16 +78,16 @@ prometheus:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 30Gi
+              storage: 20Gi
     thanos:
-      baseImage: quay.io/thanos/thanos
-      version: v0.40.1
+      image: quay.io/thanos/thanos:v0.41.0
+      version: v0.41.0
       resources:
         requests:
           cpu: 100m
-          memory: 128Mi
+          memory: 256Mi
         limits:
-          cpu: 500m
+          cpu: "1"
           memory: 512Mi
     additionalScrapeConfigs:
       - job_name: istiod
@@ -78,53 +97,57 @@ prometheus:
               names:
                 - istio-system
         relabel_configs:
-          - source_labels:
-              - __meta_kubernetes_service_name
-              - __meta_kubernetes_endpoint_port_name
+          - source_labels: [__meta_kubernetes_service_name]
             action: keep
-            regex: istiod;http-monitoring
-          - action: labelmap
-            regex: __meta_kubernetes_service_label_(.+)
-          - source_labels:
-              - __meta_kubernetes_namespace
+            regex: istiod
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: http-monitoring
+          - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
-          - source_labels:
-              - __meta_kubernetes_service_name
+          - source_labels: [__meta_kubernetes_service_name]
             target_label: service
-      - job_name: istio-envoy
+      - job_name: envoy-stats
         kubernetes_sd_configs:
           - role: pod
+            namespaces:
+              names:
+                - platform
+                - istio-system
         relabel_configs:
-          - source_labels:
-              - __meta_kubernetes_pod_container_name
+          - source_labels: [__meta_kubernetes_pod_container_name]
             action: keep
             regex: istio-proxy
-          - source_labels:
-              - __address__
+          - source_labels: [__meta_kubernetes_pod_ip]
             action: replace
             target_label: __address__
-            regex: ([^:]+)(?::\d+)?
+            regex: (.+)
             replacement: $1:15090
-          - action: labelmap
-            regex: __meta_kubernetes_pod_label_(.+)
-          - source_labels:
-              - __meta_kubernetes_namespace
+          - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
-          - source_labels:
-              - __meta_kubernetes_pod_name
+          - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
-          - source_labels:
-              - __meta_kubernetes_pod_node_name
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_node_name]
             target_label: node
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
 
 kube-state-metrics:
-  metricLabelsAllowlist:
-    - nodes=[*]
-    - pods=[*]
-    - deployments=[*]
-    - horizontalpodautoscalers=[*]
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
 
 prometheus-node-exporter:
-  extraArgs:
-    - --collector.systemd
-
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

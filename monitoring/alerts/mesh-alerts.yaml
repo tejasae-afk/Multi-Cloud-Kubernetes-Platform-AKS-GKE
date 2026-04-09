@@ -4,44 +4,48 @@ metadata:
   name: mesh-alerts
   namespace: monitoring
   labels:
+    release: mc-monitoring
     project: multi-cloud-k8s
     environment: dev
-    managed-by: manifests
+    managed-by: kubectl
 spec:
   groups:
-    - name: mesh-alerts
+    - name: mesh-health
       rules:
         - alert: MeshErrorRateHigh
           expr: |
-            max(istio:service_error_rate:ratio5m) > 0.05
+            (
+              sum(rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(istio_requests_total{reporter="destination"}[5m])), 0.001)
+            ) > 0.05
           for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Mesh 5xx rate is above 5%
+            description: 5xx traffic stayed above 5% for 5 minutes.
+        - alert: MeshMtlsNotStrict
+          expr: |
+            sum(rate(istio_requests_total{reporter="destination", connection_security_policy!="mutual_tls"}[5m])) > 0
+          for: 10m
           labels:
             severity: warning
           annotations:
-            summary: mesh error rate is high
-            description: "At least one service stayed above a 5 percent 5xx rate for 5 minutes."
-        - alert: MeshMtlsDrift
+            summary: Non-mTLS traffic showed up in the mesh
+            description: Istio saw traffic that wasn't tagged as mutual TLS for 10 minutes.
+        - alert: CrossClusterConnectivityLow
           expr: |
-            sum(
-              rate(
-                istio_requests_total{
-                  reporter="destination",
-                  connection_security_policy=~"none|unknown"
-                }[5m]
-              )
-            ) > 0
-          for: 10m
-          labels:
-            severity: critical
-          annotations:
-            summary: mesh traffic without mTLS
-            description: "Istio saw service traffic without mutual TLS for 10 minutes."
-        - alert: CrossClusterConnectivityLoss
-          expr: |
-            sum(istio:cross_cluster_requests:rate5m) == 0
+            (
+              sum(rate(istio_requests_total{source_workload="api-gateway", destination_workload="order-service"}[5m])) > 1
+            )
+            and
+            (
+              sum(rate(istio_requests_total{source_workload="api-gateway", destination_workload="order-service", source_cluster!="", destination_cluster!="", source_cluster!=destination_cluster}[5m])) == 0
+            )
           for: 15m
           labels:
-            severity: critical
+            severity: warning
           annotations:
-            summary: cross-cluster traffic disappeared
-            description: "No cross-cluster mesh traffic showed up for 15 minutes."
+            summary: Cross-cluster traffic disappeared
+            description: I still had order traffic, but none of it crossed clusters for 15 minutes.

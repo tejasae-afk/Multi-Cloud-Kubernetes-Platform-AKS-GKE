@@ -1,71 +1,141 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: platform-recording-rules
+  name: cluster-alerts
   namespace: monitoring
   labels:
+    release: mc-monitoring
     project: multi-cloud-k8s
     environment: dev
-    managed-by: manifests
+    managed-by: kubectl
 spec:
   groups:
-    - name: mcplatform-app-recording
-      interval: 30s
+    - name: cluster-health
       rules:
-        - record: mcplatform:service_requests:rate5m
+        - alert: PodCrashLooping
           expr: |
-            sum by (service, route, status_code) (
-              rate(mcplatform_http_requests_total[5m])
-            )
-        - record: mcplatform:service_error_rate:ratio5m
+            sum by (namespace, pod) (
+              increase(kube_pod_container_status_restarts_total{namespace=~"platform|istio-system"}[15m])
+            ) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pod is restarting too much
+            description: '{{ $labels.namespace }}/{{ $labels.pod }} restarted more than 3 times in 15 minutes.'
+        - alert: NodeCpuHigh
           expr: |
-            sum by (service) (
-              rate(mcplatform_http_requests_total{status_code=~"5.."}[5m])
+            100 * (1 - avg by (instance) (
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            )) > 80
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Node CPU is running hot
+            description: '{{ $labels.instance }} stayed above 80% CPU for 10 minutes.'
+        - alert: NodeNotReady
+          expr: |
+            max by (node) (
+              kube_node_status_condition{condition="Ready", status="true"} == 0
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Node is not Ready
+            description: '{{ $labels.node }} has not been Ready for 5 minutes.'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mesh-alerts
+  namespace: monitoring
+  labels:
+    release: mc-monitoring
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: kubectl
+spec:
+  groups:
+    - name: mesh-health
+      rules:
+        - alert: MeshErrorRateHigh
+          expr: |
+            (
+              sum(rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(istio_requests_total{reporter="destination"}[5m])), 0.001)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Mesh 5xx rate is above 5%
+            description: 5xx traffic stayed above 5% for 5 minutes.
+        - alert: MeshMtlsNotStrict
+          expr: |
+            sum(rate(istio_requests_total{reporter="destination", connection_security_policy!="mutual_tls"}[5m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Non-mTLS traffic showed up in the mesh
+            description: Istio saw traffic that wasn't tagged as mutual TLS for 10 minutes.
+        - alert: CrossClusterConnectivityLow
+          expr: |
+            (
+              sum(rate(istio_requests_total{source_workload="api-gateway", destination_workload="order-service"}[5m])) > 1
             )
-            /
-            clamp_min(
-              sum by (service) (
-                rate(mcplatform_http_requests_total[5m])
-              ),
-              0.001
+            and
+            (
+              sum(rate(istio_requests_total{source_workload="api-gateway", destination_workload="order-service", source_cluster!="", destination_cluster!="", source_cluster!=destination_cluster}[5m])) == 0
             )
-        - record: mcplatform:service_latency_p95:5m
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Cross-cluster traffic disappeared
+            description: I still had order traffic, but none of it crossed clusters for 15 minutes.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app-alerts
+  namespace: monitoring
+  labels:
+    release: mc-monitoring
+    project: multi-cloud-k8s
+    environment: dev
+    managed-by: kubectl
+spec:
+  groups:
+    - name: app-health
+      rules:
+        - alert: AppLatencyP99High
           expr: |
             histogram_quantile(
-              0.95,
-              sum by (service, le) (
-                rate(mcplatform_http_request_duration_seconds_bucket[5m])
+              0.99,
+              sum by (le, service) (
+                rate(mcplatform_http_request_duration_seconds_bucket{route!="/metrics"}[5m])
               )
-            )
-    - name: mcplatform-mesh-recording
-      interval: 30s
-      rules:
-        - record: istio:service_requests:rate5m
+            ) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: App p99 latency is above 2s
+            description: '{{ $labels.service }} p99 latency stayed above 2 seconds for 10 minutes.'
+        - alert: OrderServiceErrorRateHigh
           expr: |
-            sum by (destination_service_name, response_code, connection_security_policy, source_cluster, destination_cluster) (
-              rate(istio_requests_total{reporter="destination"}[5m])
-            )
-        - record: istio:service_error_rate:ratio5m
-          expr: |
-            sum by (destination_service_name) (
-              rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m])
-            )
-            /
-            clamp_min(
-              sum by (destination_service_name) (
-                rate(istio_requests_total{reporter="destination"}[5m])
-              ),
-              0.001
-            )
-        - record: istio:cross_cluster_requests:rate5m
-          expr: |
-            sum by (source_cluster, destination_cluster, destination_service_name) (
-              rate(
-                istio_requests_total{
-                  reporter="source",
-                  source_cluster!="",
-                  destination_cluster!="",
-                  source_cluster!="destination_cluster"
-                }[5m]
-              )
-            )
+            (
+              sum(rate(mcplatform_http_requests_total{service="order-service", status_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(mcplatform_http_requests_total{service="order-service"}[5m])), 0.001)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Order service 5xx rate is above 5%
+            description: order-service has been above 5% 5xx traffic for 5 minutes.

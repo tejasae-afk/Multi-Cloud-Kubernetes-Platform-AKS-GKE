@@ -1,32 +1,34 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
+  "graphTooltip": 2,
   "id": null,
   "links": [],
   "liveNow": false,
   "panels": [
     {
-      "id": 3,
-      "type": "timeseries",
-      "title": "request volume by service",
-      "description": "I used destination metrics here because they line up better with service health.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
           "color": {
             "mode": "palette-classic"
           },
@@ -38,7 +40,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 20,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -48,7 +50,7 @@
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 2,
-            "pointSize": 3,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -62,24 +64,30 @@
               "mode": "off"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "reqps"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 3,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -91,30 +99,25 @@
       },
       "targets": [
         {
-          "expr": "sum by (destination_service_name) (rate(istio_requests_total{reporter=\"destination\",destination_service_name!~\"unknown|\",cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "{{destination_service_name}}",
-          "refId": "A"
+          "expr": "sum by (destination_workload) (rate(istio_requests_total{reporter=\"destination\", destination_workload=~\"api-gateway|order-service|inventory-service\", cluster=~\"$cluster\"}[5m]))",
+          "legendFormat": "{{destination_workload}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
-      ]
+      ],
+      "title": "request volume by service",
+      "type": "timeseries"
     },
     {
-      "id": 6,
-      "type": "timeseries",
-      "title": "error rate by service",
-      "description": "When one service starts throwing 5xx, this panel tells me which one without any guessing.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
           "color": {
             "mode": "palette-classic"
           },
@@ -126,7 +129,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 20,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -136,7 +139,7 @@
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 2,
-            "pointSize": 3,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -150,24 +153,30 @@
               "mode": "off"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "percentunit"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 9,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -179,41 +188,39 @@
       },
       "targets": [
         {
-          "expr": "100 * sum by (destination_service_name) (rate(istio_requests_total{reporter=\"destination\",response_code=~\"5..\",cluster=~\"$cluster\"}[5m])) / clamp_min(sum by (destination_service_name) (rate(istio_requests_total{reporter=\"destination\",cluster=~\"$cluster\"}[5m])), 0.001)",
-          "legendFormat": "{{destination_service_name}}",
-          "refId": "A"
+          "expr": "100 * sum by (destination_workload) (rate(istio_requests_total{reporter=\"destination\", response_code=~\"5..\", destination_workload=~\"api-gateway|order-service|inventory-service\", cluster=~\"$cluster\"}[5m])) / clamp_min(sum by (destination_workload) (rate(istio_requests_total{reporter=\"destination\", destination_workload=~\"api-gateway|order-service|inventory-service\", cluster=~\"$cluster\"}[5m])), 0.001)",
+          "legendFormat": "{{destination_workload}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
-      ]
+      ],
+      "title": "error rate by service",
+      "type": "timeseries"
     },
     {
-      "id": 11,
-      "type": "heatmap",
-      "title": "latency heatmap",
-      "description": "This gets ugly fast when cross-cluster traffic starts bouncing around too much.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 14,
-        "h": 9
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
-          "custom": {
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          }
+          "unit": "ms"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 14,
       "options": {
         "calculate": false,
         "cellGap": 1,
@@ -222,13 +229,7 @@
         },
         "color": {
           "mode": "scheme",
-          "scheme": "GnYlRd"
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
-        },
-        "filterValues": {
-          "le": 1e-09
+          "scheme": "Oranges"
         },
         "legend": {
           "show": true
@@ -236,95 +237,103 @@
         "rowsFrame": {
           "layout": "auto"
         },
+        "showValue": "never",
         "tooltip": {
-          "show": true,
-          "yHistogram": false
+          "mode": "single",
+          "showColorScale": false
         },
         "yAxis": {
           "axisPlacement": "left",
+          "reverse": false,
           "unit": "ms"
         }
       },
       "targets": [
         {
-          "expr": "sum by (le) (rate(istio_request_duration_milliseconds_bucket{reporter=\"destination\",cluster=~\"$cluster\"}[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          },
+          "editorMode": "code",
+          "expr": "sum by (le) (rate(istio_request_duration_milliseconds_bucket{reporter=\"destination\", destination_workload=~\"api-gateway|order-service|inventory-service\", cluster=~\"$cluster\"}[5m]))",
           "format": "heatmap",
           "legendFormat": "{{le}}",
+          "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "latency heatmap",
+      "type": "heatmap"
     },
     {
-      "id": 14,
-      "type": "table",
-      "title": "mTLS status table",
-      "description": "If anything shows up as none or unknown here, I start looking at PeerAuthentication and sidecars.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 14,
-        "y": 8,
-        "w": 10,
-        "h": 9
-      },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
         "overrides": []
       },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 18,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "Value",
-            "desc": true
+            "desc": true,
+            "displayName": "Value"
           }
         ]
       },
       "targets": [
         {
-          "expr": "sum by (connection_security_policy, destination_service_name) (rate(istio_requests_total{reporter=\"destination\",cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "{{connection_security_policy}} {{destination_service_name}}",
-          "refId": "A"
+          "expr": "sum by (destination_workload, connection_security_policy) (rate(istio_requests_total{reporter=\"destination\", destination_workload=~\"api-gateway|order-service|inventory-service\", cluster=~\"$cluster\"}[5m]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{destination_workload}} {{connection_security_policy}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
       ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {}
-        }
-      ]
+      "title": "mTLS status table",
+      "transformations": [],
+      "type": "table"
     },
     {
-      "id": 19,
-      "type": "gauge",
-      "title": "active connections gauge",
-      "description": "This is not a fancy SRE metric. It just tells me if the mesh went strangely quiet or suddenly loud.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 0,
-        "y": 17,
-        "w": 6,
-        "h": 7
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
           "min": 0,
-          "max": 500,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -334,21 +343,27 @@
               },
               {
                 "color": "orange",
-                "value": 150
+                "value": 70
               },
               {
                 "color": "red",
-                "value": 300
+                "value": 90
               }
             ]
           },
-          "color": {
-            "mode": "thresholds"
-          }
+          "unit": "none"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 18
+      },
+      "id": 23,
       "options": {
+        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -357,192 +372,117 @@
           "values": false
         },
         "showThresholdLabels": false,
-        "showThresholdMarkers": true,
-        "orientation": "auto",
-        "text": {}
+        "showThresholdMarkers": true
       },
       "targets": [
         {
           "expr": "sum(envoy_cluster_upstream_cx_active{cluster=~\"$cluster\"})",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
-      ]
+      ],
+      "title": "active connections gauge",
+      "type": "gauge"
     },
     {
-      "id": 23,
-      "type": "timeseries",
-      "title": "cross-cluster requests",
-      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 6,
-        "y": 17,
-        "w": 18,
-        "h": 7
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "color": {
-            "mode": "palette-classic"
-          },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 3,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "align": "auto"
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           }
         },
         "overrides": []
       },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (source_cluster, destination_cluster) (rate(istio_requests_total{reporter=\"source\",source_cluster!=\"\",destination_cluster!=\"\",source_cluster!=\"destination_cluster\",cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "{{source_cluster}} -> {{destination_cluster}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 31,
-      "type": "table",
-      "title": "service security mix",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "thanos"
-      },
       "gridPos": {
-        "x": 0,
-        "y": 24,
-        "w": 24,
-        "h": 8
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 18
       },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
+      "id": 27,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "Value",
-            "desc": true
+            "desc": true,
+            "displayName": "Value"
           }
         ]
       },
       "targets": [
         {
-          "expr": "sum by (destination_service_name, connection_security_policy, response_code) (rate(istio_requests_total{reporter=\"destination\",cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "{{destination_service_name}} {{connection_security_policy}} {{response_code}}",
-          "refId": "A"
+          "expr": "sum by (source_cluster, destination_cluster) (rate(istio_requests_total{reporter=\"destination\", source_cluster!=\"\", destination_cluster!=\"\", source_cluster!=destination_cluster, cluster=~\"$cluster\"}[5m]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{source_cluster}} -> {{destination_cluster}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
       ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {}
-        }
-      ]
+      "title": "cross-cluster request paths",
+      "transformations": [],
+      "type": "table"
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 41,
+  "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "monitoring",
+    "multi-cloud",
     "istio",
     "mesh"
   ],
   "templating": {
     "list": [
       {
-        "name": "cluster",
-        "label": "cluster",
-        "type": "query",
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "datasource": {
           "type": "prometheus",
           "uid": "thanos"
         },
         "definition": "label_values(up, cluster)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "cluster",
+        "multi": false,
+        "name": "cluster",
+        "options": [],
         "query": {
+          "qryType": 1,
           "query": "label_values(up, cluster)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
         "sort": 1,
-        "hide": 0,
-        "includeAll": true,
-        "allValue": ".*",
-        "multi": false,
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        }
+        "type": "query"
       }
     ]
   },
@@ -551,7 +491,7 @@
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "Istio mesh",
   "uid": "istio-mesh",
   "version": 1,
