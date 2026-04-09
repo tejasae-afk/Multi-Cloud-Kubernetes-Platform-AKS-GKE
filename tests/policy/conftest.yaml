@@ -1,10 +1,12 @@
-# I keep this as repo metadata for CI wrappers.
-# Conftest itself still wants conftest.toml when you use its native config file path.
-policyDir: tests/policy/opa-policies
-namespace: main
-output: github
-files:
-  - helm/**/*.yaml
-  - mesh/**/*.yaml
-  - monitoring/**/*.yaml
-  - routing/**/*.yaml
+# I keep this as a tiny repo-local manifest for the policy test inputs.
+# Conftest itself still reads TOML config, so the workflow passes the CLI flags directly.
+version: 1
+policy:
+  namespace: main
+  path: tests/policy/opa-policies
+inputs:
+  - helm/values.yaml
+  - helm/values-gke.yaml
+  - helm/values-aks.yaml
+rendered:
+  output: /tmp/rendered/platform.yaml

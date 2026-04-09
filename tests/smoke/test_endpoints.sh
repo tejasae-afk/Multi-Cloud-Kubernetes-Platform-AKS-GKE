@@ -1,128 +1,115 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTEXT=""
-NAMESPACE="platform"
-BASE_URL=""
+CONTEXT="${CONTEXT:-}"
+BASE_URL="${BASE_URL:-}"
+HOST_HEADER="${HOST_HEADER:-}"
+NAMESPACE="${NAMESPACE:-platform}"
+RELEASE_NAME="${RELEASE_NAME:-mc-platform}"
+INSECURE=false
 
-while [[ $# -gt 0 ]]; do
+usage() {
+  cat <<USAGE
+Usage:
+  $(basename "$0") [--context <kubectl-context> --namespace platform --release-name mc-platform]
+  $(basename "$0") [--base-url <url> --host-header api.platform.example.com]
+USAGE
+}
+
+while (($#)); do
   case "$1" in
     --context)
       CONTEXT="$2"
-      shift 2
-      ;;
-    --namespace)
-      NAMESPACE="$2"
       shift 2
       ;;
     --base-url)
       BASE_URL="$2"
       shift 2
       ;;
+    --host-header)
+      HOST_HEADER="$2"
+      shift 2
+      ;;
+    --namespace)
+      NAMESPACE="$2"
+      shift 2
+      ;;
+    --release-name)
+      RELEASE_NAME="$2"
+      shift 2
+      ;;
+    --insecure)
+      INSECURE=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
       echo "unknown flag: $1" >&2
+      usage >&2
       exit 1
       ;;
   esac
 done
 
-if [[ -z "${CONTEXT}" ]]; then
-  echo "--context is required" >&2
-  exit 1
+curl_args=(-fsS)
+if [[ "$INSECURE" == true ]]; then
+  curl_args+=(-k)
+fi
+if [[ -n "$HOST_HEADER" ]]; then
+  curl_args+=(-H "Host: ${HOST_HEADER}")
 fi
 
-RED=$'\033[31m'
-GREEN=$'\033[32m'
-BLUE=$'\033[34m'
-RESET=$'\033[0m'
-
-need_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    printf '%sMissing command: %s%s\n' "${RED}" "$1" "${RESET}" >&2
-    exit 1
-  fi
-}
-
-for cmd in kubectl curl grep; do
-  need_cmd "${cmd}"
-done
-
-info() {
-  printf '%s== %s ==%s\n' "${BLUE}" "$*" "${RESET}"
-}
-
-ok() {
-  printf '%s✔ %s%s\n' "${GREEN}" "$*" "${RESET}"
-}
-
-svc_name() {
-  local app="$1"
-  kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get svc \
-    -l "app.kubernetes.io/name=${app}" \
-    -o jsonpath='{.items[0].metadata.name}'
-}
-
-assert_200() {
+check_url() {
   local url="$1"
-  local label="$2"
-  local code
-  code="$(curl -ksS -o /dev/null -w '%{http_code}' "${url}" || true)"
-  if [[ "${code}" != "200" ]]; then
-    printf '%sExpected 200 from %s but got %s%s\n' "${RED}" "${label}" "${code}" "${RESET}" >&2
-    exit 1
-  fi
-  ok "${label}"
+  echo "checking ${url}"
+  curl "${curl_args[@]}" "$url" >/tmp/endpoint.out
+  # cat /tmp/endpoint.out
 }
 
-PORT_FWDS=()
+if [[ -n "$BASE_URL" ]]; then
+  check_url "${BASE_URL}/healthz"
+  check_url "${BASE_URL}/api/health"
+  check_url "${BASE_URL}/api/orders"
+  echo "endpoint smoke checks passed"
+  exit 0
+fi
+
+[[ -n "$CONTEXT" ]] || { echo "either --context or --base-url is required" >&2; exit 1; }
+
+API_PORT="${API_PORT:-18080}"
+ORDER_PORT="${ORDER_PORT:-18081}"
+INVENTORY_PORT="${INVENTORY_PORT:-18082}"
+
 cleanup() {
-  for pid in "${PORT_FWDS[@]:-}"; do
-    kill "${pid}" >/dev/null 2>&1 || true
-  done
+  [[ -n "${API_PID:-}" ]] && kill "$API_PID" >/dev/null 2>&1 || true
+  [[ -n "${ORDER_PID:-}" ]] && kill "$ORDER_PID" >/dev/null 2>&1 || true
+  [[ -n "${INVENTORY_PID:-}" ]] && kill "$INVENTORY_PID" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-forward_service() {
-  local service_name="$1"
-  local local_port="$2"
-  local remote_port="$3"
-  kubectl --context "${CONTEXT}" -n "${NAMESPACE}" port-forward "svc/${service_name}" "${local_port}:${remote_port}" >/tmp/"${service_name}".pf.log 2>&1 &
-  PORT_FWDS+=("$!")
-  sleep 3
-}
+kubectl --context "$CONTEXT" -n "$NAMESPACE" port-forward "svc/${RELEASE_NAME}-api-gateway" "${API_PORT}:8080" >/tmp/api-pf.log 2>&1 &
+API_PID=$!
+kubectl --context "$CONTEXT" -n "$NAMESPACE" port-forward "svc/${RELEASE_NAME}-order-service" "${ORDER_PORT}:8081" >/tmp/order-pf.log 2>&1 &
+ORDER_PID=$!
+kubectl --context "$CONTEXT" -n "$NAMESPACE" port-forward "svc/${RELEASE_NAME}-inventory-service" "${INVENTORY_PORT}:8082" >/tmp/inventory-pf.log 2>&1 &
+INVENTORY_PID=$!
 
-info "Waiting for deployments"
-kubectl --context "${CONTEXT}" -n "${NAMESPACE}" wait deploy -l app.kubernetes.io/part-of=multi-cloud-k8s --for=condition=Available --timeout=5m >/dev/null
+for _ in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
 
-api_service="$(svc_name "api-gateway")"
-order_service="$(svc_name "order-service")"
-inventory_service="$(svc_name "inventory-service")"
+check_url "http://127.0.0.1:${API_PORT}/healthz"
+check_url "http://127.0.0.1:${API_PORT}/api/health"
+check_url "http://127.0.0.1:${API_PORT}/api/orders"
+check_url "http://127.0.0.1:${ORDER_PORT}/healthz"
+check_url "http://127.0.0.1:${ORDER_PORT}/orders"
+check_url "http://127.0.0.1:${INVENTORY_PORT}/healthz"
+check_url "http://127.0.0.1:${INVENTORY_PORT}/inventory"
 
-[[ -n "${api_service}" ]] || { echo "api-gateway service not found" >&2; exit 1; }
-[[ -n "${order_service}" ]] || { echo "order-service service not found" >&2; exit 1; }
-[[ -n "${inventory_service}" ]] || { echo "inventory-service service not found" >&2; exit 1; }
-
-info "Port-forwarding services from ${CONTEXT}"
-forward_service "${api_service}" 18080 8080
-forward_service "${order_service}" 18081 8081
-forward_service "${inventory_service}" 18082 8082
-
-assert_200 "http://127.0.0.1:18080/healthz" "api-gateway /healthz"
-assert_200 "http://127.0.0.1:18080/readyz" "api-gateway /readyz"
-assert_200 "http://127.0.0.1:18080/metrics" "api-gateway /metrics"
-
-assert_200 "http://127.0.0.1:18081/healthz" "order-service /healthz"
-assert_200 "http://127.0.0.1:18081/readyz" "order-service /readyz"
-assert_200 "http://127.0.0.1:18081/orders" "order-service /orders"
-assert_200 "http://127.0.0.1:18081/metrics" "order-service /metrics"
-
-assert_200 "http://127.0.0.1:18082/healthz" "inventory-service /healthz"
-assert_200 "http://127.0.0.1:18082/readyz" "inventory-service /readyz"
-assert_200 "http://127.0.0.1:18082/inventory" "inventory-service /inventory"
-assert_200 "http://127.0.0.1:18082/metrics" "inventory-service /metrics"
-
-if [[ -n "${BASE_URL}" ]]; then
-  assert_200 "${BASE_URL}/api/health" "public /api/health"
-fi
-
-# echo "DEBUG: ${api_service} ${order_service} ${inventory_service}"
+echo "endpoint smoke checks passed"

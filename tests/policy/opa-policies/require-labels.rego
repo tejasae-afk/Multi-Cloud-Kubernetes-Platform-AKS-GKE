@@ -2,73 +2,21 @@ package main
 
 import rego.v1
 
-workload_kinds := {
-  "Pod",
-  "Deployment",
-  "StatefulSet",
-  "DaemonSet",
-  "Job",
-  "CronJob"
-}
-
-is_workload if workload_kinds[input.kind]
-
-pod_metadata(obj) := metadata if {
-  obj.kind == "Pod"
-  metadata := obj.metadata
-}
-
-pod_metadata(obj) := metadata if {
-  obj.kind in {"Deployment", "StatefulSet", "DaemonSet", "Job"}
-  metadata := obj.spec.template.metadata
-}
-
-pod_metadata(obj) := metadata if {
-  obj.kind == "CronJob"
-  metadata := obj.spec.jobTemplate.spec.template.metadata
-}
-
-pod_spec(obj) := spec if {
-  obj.kind == "Pod"
-  spec := obj.spec
-}
-
-pod_spec(obj) := spec if {
-  obj.kind in {"Deployment", "StatefulSet", "DaemonSet", "Job"}
-  spec := obj.spec.template.spec
-}
-
-pod_spec(obj) := spec if {
-  obj.kind == "CronJob"
-  spec := obj.spec.jobTemplate.spec.template.spec
-}
-
-containers(obj)[container] if {
-  spec := pod_spec(obj)
-  some container in object.get(spec, "containers", [])
-}
-
-containers(obj)[container] if {
-  spec := pod_spec(obj)
-  some container in object.get(spec, "initContainers", [])
-}
-
-object_name(obj) := name if {
-  name := obj.metadata.name
+workload_labels := labels if {
+  input.kind == "Pod"
+  labels := object.get(input.metadata, "labels", {})
+} else := labels if {
+  labels := object.get(object.get(object.get(input.spec, "template", {}), "metadata", {}), "labels", {})
 }
 
 deny contains msg if {
-  is_workload
-  metadata := pod_metadata(input)
-  labels := object.get(metadata, "labels", {})
-  not object.get(labels, "app", "")
-  msg := sprintf("%s/%s is missing label app", [input.kind, object_name(input)])
+  labels := workload_labels
+  not labels.app
+  msg := sprintf("%s/%s is missing the app label", [input.kind, input.metadata.name])
 }
 
 deny contains msg if {
-  is_workload
-  metadata := pod_metadata(input)
-  labels := object.get(metadata, "labels", {})
-  not object.get(labels, "version", "")
-  msg := sprintf("%s/%s is missing label version", [input.kind, object_name(input)])
+  labels := workload_labels
+  not labels.version
+  msg := sprintf("%s/%s is missing the version label", [input.kind, input.metadata.name])
 }

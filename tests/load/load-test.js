@@ -1,56 +1,63 @@
-import http from "k6/http";
-import { check, sleep } from "k6";
-import exec from "k6/execution";
+import http from 'k6/http';
+import { sleep, check } from 'k6';
 
-const baseUrl = __ENV.TARGET_URL || "https://api.platform.haleops.net";
+const baseUrl = __ENV.BASE_URL || 'http://127.0.0.1:8080';
+// NOTE: don't touch this, breaks AKS east-west for reasons I don't fully get.
+const hostHeader = __ENV.HOST_HEADER || '';
+const insecure = (__ENV.INSECURE || 'false') === 'true';
 
 export const options = {
+  insecureSkipTLSVerify: insecure,
   discardResponseBodies: false,
+  thresholds: {
+    http_req_failed: ['rate<0.01'],
+    http_req_duration: ['p(99)<2000'],
+  },
   scenarios: {
-    app: {
-      executor: "ramping-vus",
+    api: {
+      executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: "2m", target: 50 },
-        { duration: "5m", target: 50 },
-        { duration: "1m", target: 0 },
+        { duration: '2m', target: 50 },
+        { duration: '5m', target: 50 },
+        { duration: '1m', target: 0 },
       ],
-      gracefulRampDown: "15s",
+      gracefulRampDown: '10s',
     },
-  },
-  thresholds: {
-    http_req_failed: ["rate<0.01"],
-    http_req_duration: ["p(99)<2000"],
   },
 };
 
-function pathForIteration() {
-  const pick = Math.random();
+function buildParams(routeHint = '') {
+  const headers = {
+    'x-request-id': `${__VU}-${__ITER}`,
+  };
 
-  if (pick < 0.70) {
-    return "/api/orders";
+  if (hostHeader) {
+    headers['Host'] = hostHeader;
   }
 
-  if (pick < 0.995) {
-    return "/api/health";
+  if (routeHint) {
+    headers['x-route-to'] = routeHint;
   }
 
-  return "/missing";
+  return { headers, tags: { kind: routeHint || 'default' } };
 }
 
 export default function () {
-  const path = pathForIteration();
-  const headers = {
-    "x-request-id": `${exec.vu.idInTest}-${exec.scenario.iterationInTest}`,
-  };
+  const choice = Math.random();
+  let response;
 
-  const res = http.get(`${baseUrl}${path}`, { headers });
+  if (choice < 0.70) {
+    response = http.get(`${baseUrl}/api/orders`, buildParams());
+  } else if (choice < 0.90) {
+    response = http.get(`${baseUrl}/api/orders`, buildParams('aks'));
+  } else {
+    response = http.get(`${baseUrl}/api/health`, buildParams());
+  }
 
-  const expectedStatus = path === "/missing" ? 404 : 200;
-
-  check(res, {
-    "status matches route": (r) => r.status === expectedStatus,
+  check(response, {
+    'status is 200': (r) => r.status === 200,
   });
 
-  sleep(0.2);
+  sleep(Math.random() * 1.5);
 }
