@@ -2,6 +2,36 @@
 
 > A production-shaped platform running the same application stack on GKE and AKS, joined by an Istio multi-primary mesh, with unified observability through Thanos and Grafana and DNS-level failover through Azure Traffic Manager.
 
+
+## Motivation
+
+Most Kubernetes tutorials stop at a single cluster on a single cloud. The moment a real platform needs to survive a regional outage, serve traffic from multiple continents, or run on whichever cloud a customer mandates, the single-cluster model breaks. I built this to work through those problems hands-on — vendor lock-in at the infrastructure layer, mesh routing across network boundaries, and observability when your metrics live in two separate clouds.
+
+The secondary motivation was CI/CD without long-lived cloud credentials. OIDC-based authentication for GitHub Actions is the right approach but rarely shown end-to-end for both GCP and Azure in the same pipeline.
+
+---
+
+## Why It Matters
+
+- **Vendor independence** — no single cloud provider failure takes the platform offline. Traffic Manager shifts load in minutes; the mesh reroutes within seconds once traffic is flowing.
+- **Regulated workloads** — multi-cloud is often a contractual or compliance requirement, not a choice. This platform demonstrates the patterns (separate VPCs, explicit trust boundaries, no cross-cloud shared credentials) that those environments demand.
+- **Cost optionality** — running identical workloads on two clouds means you can shift capacity toward whichever is cheaper at renewal time without re-architecting the application.
+- **Operational realism** — the runbooks, alert rules, and failover scripts here are the kind of artefacts a platform team actually maintains, not just YAML that provisions and never gets touched again.
+
+---
+
+## Real-World Uses
+
+This architecture pattern directly maps to production scenarios across several industries:
+
+- **SaaS platforms** needing 99.99% SLAs without betting on one cloud region
+- **Financial services** with cloud-specific data residency requirements per jurisdiction
+- **Healthcare and government** workloads where a customer's procurement mandates a specific cloud provider per environment
+- **Global applications** routing users to the geographically nearest healthy cluster
+- **Disaster recovery** setups where one cloud acts as active and the other as warm standby
+
+---
+
 ---
 
 ## Architecture
