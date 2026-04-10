@@ -1,9 +1,45 @@
-# multi-cloud-k8s-platform
+# Multi-Cloud Kubernetes Platform (GKE + AKS)
 
-## What this is
-I built this as a platform project that let me work through the pieces I actually care about: infra, traffic, identity, observability, and failure recovery. It runs the same small app stack on GKE and AKS, wires the clusters together with Istio, and keeps metrics in one Grafana on the GKE side.
+> A production-shaped platform running the same application stack on GKE and AKS, joined by an Istio multi-primary mesh, with unified observability through Thanos and Grafana and DNS-level failover through Azure Traffic Manager.
 
-## Architecture at a glance
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    DNS["Cloud DNS\nAzure Traffic Manager\n(weighted routing + failover)"]
+
+    DNS --> GKE
+    DNS --> AKS
+
+    subgraph GKE ["GKE / us-central1"]
+        GIG["Istio ingress gateway"]
+        GAGW["api-gateway"]
+        GORD["order-service"]
+        GINV["inventory-service"]
+        GPROM["Prometheus"]
+        GIG --> GAGW --> GORD --> GINV
+        GPROM --> THANOS
+    end
+
+    subgraph AKS ["AKS / East US"]
+        AIG["Istio ingress gateway"]
+        AAGW["api-gateway"]
+        AORD["order-service"]
+        AINV["inventory-service"]
+        APROM["Prometheus"]
+        AIG --> AAGW --> AORD --> AINV
+    end
+
+    GORD <-->|"east-west mTLS :15443"| AORD
+    APROM -->|"remote_write"| THANOS["Thanos Receive → Query"]
+    THANOS --> GRAFANA["Grafana\n(single pane)"]
+```
+
+<details>
+<summary>ASCII version</summary>
+
 ```text
                                    +----------------------+
                                    | Cloud DNS            |
@@ -12,337 +48,135 @@ I built this as a platform project that let me work through the pieces I actuall
                                               |
                                      public traffic + health
                                               |
-                +-----------------------------+-----------------------------+
-                |                                                           |
-                v                                                           v
-      +---------------------+                                     +---------------------+
-      | GKE / us-central1   |                                     | AKS / East US       |
-      | network1 / cluster1 |                                     | network2 / cluster2 |
-      +----------+----------+                                     +----------+----------+
-                 |                                                           |
-     +-----------+-----------+                                   +-----------+-----------+
-     | Istio ingress gateway |                                   | Istio ingress gateway |
-     +-----------+-----------+                                   +-----------+-----------+
-                 |                                                           |
-         +-------+-------+                                           +-------+-------+
-         | api-gateway   |                                           | api-gateway   |
-         +-------+-------+                                           +-------+-------+
-                 |                                                           |
-         +-------+-------+                                           +-------+-------+
-         | order-service | <==== east-west mTLS over 15443 =====>    | order-service |
-         +-------+-------+                                           +-------+-------+
-                 |                                                           |
-         +-------+-------+                                           +-------+-------+
-         | inventory-svc |                                           | inventory-svc |
-         +---------------+                                           +---------------+
+                                +-----------------------------+-----------------------------+
+                                |                                                           |
+                                v                                                           v
+                      +---------------------+                                     +---------------------+
+                      | GKE / us-central1   |                                     | AKS / East US       |
+                      | network1 / cluster1 |                                     | network2 / cluster2 |
+                      +----------+----------+                                     +----------+----------+
+                                 |                                                           |
+                        +-----------+-----------+                                   +-----------+-----------+
+                        | Istio ingress gateway |                                   | Istio ingress gateway |
+                        +-----------+-----------+                                   +-----------+-----------+
+                                 |                                                           |
+                         +-------+-------+                                           +-------+-------+
+                         | api-gateway   |                                           | api-gateway   |
+                         +-------+-------+                                           +-------+-------+
+                                 |                                                           |
+                         +-------+-------+                                           +-------+-------+
+                         | order-service | <==== east-west mTLS over 15443 =====>    | order-service |
+                         +-------+-------+                                           +-------+-------+
+                                 |                                                           |
+                         +-------+-------+                                           +-------+-------+
+                         | inventory-svc |                                           | inventory-svc |
+                         +---------------+                                           +---------------+
 
-                 Prometheus                                               Prometheus
-                      |                                                        |
-                      |                              remote_write               |
-                      +-----------------------+<-------------------------------+
-                                              |
-                                       Thanos Receive
-                                              |
-                                         Thanos Query
-                                              |
-                                           Grafana
+                         Prometheus                                               Prometheus
+                              |                                                        |
+                              |                              remote_write               |
+                              +-----------------------+<-------------------------------+
+                                                      |
+                                               Thanos Receive
+                                                      |
+                                                 Thanos Query
+                                                      |
+                                                   Grafana
 ```
+</details>
 
-## What works today
-- Terraform brings up the cloud side on GKE and AKS
-- Helm deploys the app stack to both clusters
-- Istio runs multi-primary multi-network with east-west gateways
-- Cross-cluster calls work through the mesh
-- Azure Traffic Manager handles public weighted routing and failover
-- Grafana on GKE shows metrics from both clusters
-- GitHub Actions builds, scans, deploys, and runs checks with OIDC auth
+---
 
-## Why I built it this way
-I wanted one repo that forced me to deal with tradeoffs instead of hiding them. GKE and AKS do not look the same once you get past the cluster marketing page, so I kept them in separate Terraform modules. The mesh is multi-network because pod IPs stop mattering the second traffic crosses clouds. Monitoring is push-based from AKS to GKE because that plays nicer with NAT and public edges than a pull-only setup.
+## What Works
 
-I also kept failover layered. Public traffic moves at DNS, which is slower but simple. Inside the mesh, outlier detection reacts faster once requests are already moving. That split made the whole platform easier to reason about.
+- Terraform provisions GKE and AKS with separate cloud-specific modules
+- Helm deploys the application stack to both clusters with per-cluster value overrides
+- Istio runs multi-primary multi-network with east-west gateways for cross-cluster mTLS
+- Cross-cluster service calls route through the mesh without manual endpoint management
+- Azure Traffic Manager handles public weighted routing and health-based failover
+- Grafana on GKE shows metrics from both clusters via Thanos remote_write from AKS
+- GitHub Actions builds, scans, and deploys with OIDC — no static cloud keys in GitHub
 
-## Main pieces
+---
+
+## Why I Built It This Way
+
+I wanted one repo that forced me to deal with tradeoffs instead of hiding them. GKE and AKS do not look the same once you get past the cluster marketing page, so I kept them in separate Terraform modules rather than abstracting them into a generic interface that would smooth over the differences.
+
+The mesh is multi-network because pod IPs stop being meaningful the second traffic crosses clouds. Monitoring is push-based from AKS to GKE because that plays nicer with NAT and public edges than a pull-only setup.
+
+Failover is intentionally layered. Public traffic moves at DNS, which is slower but simple and requires no mesh awareness. Inside the mesh, outlier detection reacts faster once requests are already moving. Keeping those two mechanisms separate made the whole platform easier to reason about and debug independently.
+
+---
+
+## Stack
+
 | Area | Version / shape | Notes |
-| --- | --- | --- |
+|---|---|---|
 | Terraform | 1.14.8 | Root module with separate `gke/`, `aks/`, and `dns/` modules |
 | GCP provider | `hashicorp/google` 7.25.0 | GKE, VPC, firewall, Cloud DNS |
 | Azure provider | `hashicorp/azurerm` 4.66.0 | AKS, VNet, NSG, Traffic Manager |
-| Kubernetes | GKE Regular channel, AKS current GA | I stopped hard-pinning 1.29 once GKE aged past support |
+| Kubernetes | GKE Regular channel, AKS current GA | |
 | Istio | 1.29.1 | Multi-primary, multi-network with east-west gateways |
 | Helm | 4.1.3 | App chart, monitoring installs, external-dns |
 | Go | 1.22.x | `api-gateway` and `order-service` |
 | Python | 3.12.x / Flask 3.1.x | `inventory-service` |
-| Monitoring | kube-prometheus-stack 82.10.3, Thanos Receive + Query, Grafana 10.7.0 chart | One Grafana view over both clusters |
-| CI | GitHub Actions + OIDC | No static cloud keys in GitHub |
+| Monitoring | kube-prometheus-stack 82.10.3 · Thanos Receive + Query · Grafana 10.7.0 | One Grafana view over both clusters |
+| CI | GitHub Actions + OIDC | No static cloud credentials in GitHub |
 
-## Repo map
-- `terraform/` builds the cloud side
-- `app/` has the three services and local `docker-compose`
-- `helm/` installs the app stack on both clusters
-- `mesh/` sets up multi-cluster Istio and traffic policy
-- `monitoring/` handles Prometheus, Thanos, Grafana, and alerts
-- `routing/` handles external-dns, Traffic Manager, and failover checks
-- `tests/` holds smoke, integration, load, and policy checks
-- `docs/` is where I kept the reference docs, ADRs, runbooks, notes, and interview prep
+---
 
-## Full project tree
+## Quick Start
+
+1. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` and fill in cloud, registry, and DNS values.
+2. `make init TF_BACKEND_BUCKET=<bucket> TF_BACKEND_PREFIX=multi-cloud-k8s/dev`
+3. `make plan-gke && make plan-aks`
+4. `make apply-all`
+5. Build and push images, then deploy the Helm chart to both clusters.
+6. `./mesh/scripts/setup-mesh.sh --gke-context <ctx> --aks-context <ctx>`
+7. `./monitoring/scripts/install-monitoring.sh --gke-context <ctx> --aks-context <ctx>`
+8. `./routing/scripts/dns-verify.sh && ./routing/scripts/test-failover.sh && ./scripts/quick-test.sh`
+
+---
+
+## Repository Layout
+
 ```text
 .
-├── .github
-│   ├── actions
-│   │   └── setup-kubeconfig
-│   │       └── action.yml
-│   ├── workflows
-│   │   ├── build-push.yml
-│   │   ├── deploy.yml
-│   │   ├── mesh-verify.yml
-│   │   ├── nightly-tests.yml
-│   │   ├── terraform-apply.yml
-│   │   └── terraform-plan.yml
-│   ├── CODEOWNERS
-│   └── PULL_REQUEST_TEMPLATE.md
-├── .vscode
-│   └── settings.json
-├── app
-│   ├── api-gateway
-│   │   ├── Dockerfile
-│   │   ├── go.mod
-│   │   ├── main.go
-│   │   └── README.md
-│   ├── inventory-service
-│   │   ├── __init__.py
-│   │   ├── app.py
-│   │   ├── Dockerfile
-│   │   ├── gunicorn.conf.py
-│   │   ├── README.md
-│   │   └── requirements.txt
-│   ├── order-service
-│   │   ├── Dockerfile
-│   │   ├── go.mod
-│   │   ├── main.go
-│   │   └── README.md
-│   ├── docker-compose.yml
-│   └── README.md
-├── costs
-│   ├── estimate.md
-│   └── optimization-notes.md
-├── docs
-│   ├── adr
-│   │   ├── 001-multi-cloud-strategy.md
-│   │   ├── 002-service-mesh-selection.md
-│   │   ├── 003-monitoring-architecture.md
-│   │   ├── 004-traffic-routing.md
-│   │   └── 005-cicd-strategy.md
-│   ├── architecture
-│   │   ├── disaster-recovery.md
-│   │   ├── mesh-architecture.md
-│   │   ├── networking.md
-│   │   ├── observability.md
-│   │   └── overview.md
-│   ├── images
-│   │   └── README.md
-│   ├── runbooks
-│   │   ├── cluster-failover.md
-│   │   ├── incident-response.md
-│   │   ├── mesh-troubleshooting.md
-│   │   └── scaling.md
-│   ├── git-history.txt
-│   ├── interview-prep.md
-│   └── NOTES.md
-├── helm
-│   ├── charts
-│   │   ├── api-gateway
-│   │   │   ├── templates
-│   │   │   │   ├── _helpers.tpl
-│   │   │   │   ├── configmap.yaml
-│   │   │   │   ├── deployment.yaml
-│   │   │   │   ├── hpa.yaml
-│   │   │   │   ├── pdb.yaml
-│   │   │   │   ├── service.yaml
-│   │   │   │   └── serviceaccount.yaml
-│   │   │   ├── Chart.yaml
-│   │   │   └── values.yaml
-│   │   ├── inventory-service
-│   │   │   ├── templates
-│   │   │   │   ├── _helpers.tpl
-│   │   │   │   ├── configmap.yaml
-│   │   │   │   ├── deployment.yaml
-│   │   │   │   ├── hpa.yaml
-│   │   │   │   ├── pdb.yaml
-│   │   │   │   ├── service.yaml
-│   │   │   │   └── serviceaccount.yaml
-│   │   │   ├── Chart.yaml
-│   │   │   └── values.yaml
-│   │   └── order-service
-│   │       ├── templates
-│   │       │   ├── _helpers.tpl
-│   │       │   ├── configmap.yaml
-│   │       │   ├── deployment.yaml
-│   │       │   ├── hpa.yaml
-│   │       │   ├── pdb.yaml
-│   │       │   ├── service.yaml
-│   │       │   └── serviceaccount.yaml
-│   │       ├── Chart.yaml
-│   │       └── values.yaml
-│   ├── Chart.yaml
-│   ├── README.md
-│   ├── values-aks.yaml
-│   ├── values-gke.yaml
-│   └── values.yaml
-├── mesh
-│   ├── certs
-│   │   ├── output
-│   │   │   └── .gitkeep
-│   │   ├── .gitignore
-│   │   ├── .gitkeep
-│   │   └── generate-certs.sh
-│   ├── istio
-│   │   ├── east-west-gw-aks.yaml
-│   │   ├── east-west-gw-gke.yaml
-│   │   ├── expose-services-aks.yaml
-│   │   ├── expose-services-gke.yaml
-│   │   ├── install-aks.yaml
-│   │   ├── install-gke.yaml
-│   │   └── peer-authentication.yaml
-│   ├── scripts
-│   │   ├── debug-mesh.sh
-│   │   ├── setup-mesh.sh
-│   │   └── verify-mesh.sh
-│   ├── traffic
-│   │   ├── canary-routing.yaml
-│   │   ├── destination-rule.yaml
-│   │   ├── gateway.yaml
-│   │   └── virtual-service.yaml
-│   └── README.md
-├── monitoring
-│   ├── alerts
-│   │   ├── app-alerts.yaml
-│   │   ├── cluster-alerts.yaml
-│   │   └── mesh-alerts.yaml
-│   ├── grafana
-│   │   ├── dashboards
-│   │   │   ├── app-metrics.json
-│   │   │   ├── infrastructure.json
-│   │   │   ├── istio-mesh.json
-│   │   │   └── multi-cluster-overview.json
-│   │   ├── datasources.yaml
-│   │   └── values.yaml
-│   ├── prometheus
-│   │   ├── alerting-rules.yaml
-│   │   ├── servicemonitor-app.yaml
-│   │   ├── thanos-receive.yaml
-│   │   ├── values-aks.yaml
-│   │   └── values-gke.yaml
-│   ├── scripts
-│   │   ├── generate-traffic.sh
-│   │   ├── install-monitoring.sh
-│   │   └── port-forward-grafana.sh
-│   └── README.md
-├── routing
-│   ├── external-dns
-│   │   ├── clusterrole.yaml
-│   │   ├── values-aks.yaml
-│   │   └── values-gke.yaml
-│   ├── health-checks
-│   │   ├── connectivity-check.yaml
-│   │   └── synthetic-monitor.sh
-│   ├── scripts
-│   │   ├── dns-verify.sh
-│   │   ├── test-failover.sh
-│   │   └── traffic-split-test.sh
-│   ├── traffic-manager
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   └── README.md
-├── scripts
-│   └── quick-test.sh
-├── terraform
-│   ├── aks
-│   │   ├── iam.tf
-│   │   ├── main.tf
-│   │   ├── nsg.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   ├── dns
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   ├── gke
-│   │   ├── firewall.tf
-│   │   ├── iam.tf
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   ├── backend.tf
-│   ├── main.tf
-│   ├── outputs.tf
-│   ├── terraform.tfvars.example
-│   ├── variables.tf
-│   └── versions.tf
-├── tests
-│   ├── integration
-│   │   ├── test_cross_cluster.sh
-│   │   ├── test_failover.sh
-│   │   └── test_mesh_routing.sh
-│   ├── load
-│   │   ├── load-test.js
-│   │   └── run-load-test.sh
-│   ├── policy
-│   │   ├── opa-policies
-│   │   │   ├── no-privileged.rego
-│   │   │   ├── require-labels.rego
-│   │   │   └── resource-limits.rego
-│   │   └── conftest.yaml
-│   └── smoke
-│       ├── test_endpoints.sh
-│       └── test_metrics.sh
-├── .editorconfig
-├── .gitignore
-├── .pre-commit-config.yaml
-├── CHANGELOG.md
-├── Justfile
-├── LICENSE
-├── Makefile
-└── README.md
+├── terraform/          # Cloud infra — separate gke/, aks/, dns/ modules
+├── app/                # Three services (api-gateway Go, order-service Go, inventory-service Python)
+│   └── docker-compose.yml
+├── helm/               # Umbrella chart with per-cluster value overrides
+├── mesh/               # Istio multi-cluster setup, east-west gateways, traffic policy
+├── monitoring/         # Prometheus, Thanos, Grafana, alerts
+├── routing/            # external-dns, Traffic Manager Terraform, failover scripts
+├── tests/              # Smoke, integration, load, OPA policy checks
+├── docs/               # Architecture docs, ADRs, runbooks
+├── costs/              # Cost estimate and optimization notes
+├── Makefile            # All workflow targets
+└── Justfile            # Alternative task runner
 ```
 
-## Quick start
-I don't use this README like a tutorial. This is the shortest path I actually take.
-
-1. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars`.
-2. Fill in the cloud, registry, and DNS values.
-3. Run `make init TF_BACKEND_BUCKET=<bucket> TF_BACKEND_PREFIX=multi-cloud-k8s/dev`.
-4. Run `make plan-gke` and `make plan-aks`.
-5. Run `make apply-all`.
-6. Build and push the images, then deploy the Helm chart to both clusters.
-7. Run `./mesh/scripts/setup-mesh.sh --gke-context <gke-context> --aks-context <aks-context>`.
-8. Run `./monitoring/scripts/install-monitoring.sh --gke-context <gke-context> --aks-context <aks-context>`.
-9. Run `./routing/scripts/dns-verify.sh`, `./routing/scripts/test-failover.sh`, and `./scripts/quick-test.sh`.
+---
 
 ## Costs
-The always-on lab shape lands around **$675/month** with on-demand nodes, public edges, central monitoring, and both clusters up all the time. Most of the bill is still just the node pools. The detail is in `costs/estimate.md`.
 
-## Known gaps
-- I propagate tracing headers, but I never added Jaeger or Tempo, so I still don't store spans anywhere.
-- The dashboards work fine, but I would still clean up some JSON and panel layout if I kept this repo alive longer.
-- The platform is always on right now. Night scale-down and cheaper node choices are still on the list if I care more about cost than convenience.
+The always-on lab shape runs around **$675/month** — on-demand node pools, public edges, central monitoring, both clusters up continuously. Most of the bill is node compute. Detail in [`costs/estimate.md`](costs/estimate.md).
 
-## Docs I keep open most often
-- `docs/architecture/overview.md`
-- `docs/architecture/mesh-architecture.md`
-- `docs/architecture/observability.md`
-- `docs/runbooks/cluster-failover.md`
-- `docs/runbooks/mesh-troubleshooting.md`
-- `docs/interview-prep.md`
-- `docs/NOTES.md`
+---
 
-## Release markers
-- `0.1.0` infra
-- `0.2.0` app + Helm
-- `0.3.0` mesh
-- `0.4.0` monitoring
-- `0.5.0` routing
-- `0.9.0` CI and tests
-- `1.0.0` docs and polish
+## Known Gaps
+
+- Tracing headers are propagated but no span store is wired up — Jaeger or Tempo would be the next addition.
+- Grafana dashboard JSON has some rough panel layout that I'd clean up if I kept this running longer.
+- No night-time scale-down — the platform stays always-on right now, which trades cost for simplicity.
+
+---
+
+## What I Learned
+
+- **Multi-network Istio is not the same as multi-cluster Istio.** When pod CIDRs overlap across clouds you cannot use flat networking. The east-west gateway pattern — where each cluster exposes services on a dedicated gateway and the mesh routes to remote endpoints by hostname — is the only option, and debugging it when it breaks requires reading Envoy xDS state directly with `istioctl proxy-config`.
+- **GKE and AKS Terraform modules cannot share an abstraction cleanly.** Firewall rules, node pool shapes, workload identity setup, and managed add-on APIs are different enough that a shared module would have been a leaky abstraction. Separate modules with explicit outputs were more honest.
+- **OIDC for GitHub Actions is non-trivial on AKS.** GCP has first-class Workload Identity Federation support in the provider. Azure requires a federated credential on an App Registration, RBAC assignment on the subscription, and the `azure/login` action wired correctly. Getting both working in the same pipeline without static keys took a few iterations.
+- **Push-based remote_write from AKS to GKE is more reliable than federation across clouds.** Prometheus federation pulls — if NAT or public IPs shift, scrapes fail silently. With Thanos Receive, the AKS cluster pushes metrics over a stable public endpoint and the failure mode is visible immediately in Thanos Query.
+- **Layering failover at DNS and mesh separately is the right call.** DNS failover is slow (TTL-bound) but requires zero mesh awareness — it works even if Istio is broken. Mesh-level outlier detection is fast but only kicks in once traffic is already flowing. Keeping them independent meant I could test and reason about each layer without the other interfering.
