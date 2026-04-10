@@ -5,7 +5,9 @@
 
 ## Motivation
 
-Single-cluster tutorials don't survive a regional outage, a multi-continent user base, or a customer who mandates a specific cloud. I built this to work through those problems for real — not simulate them.
+Cloud platforms fail. Regions go down, vendors have outages, and enterprise customers often mandate which cloud their data lives on. A platform that bets everything on one provider is one incident away from a full outage with no fallback.
+
+I wanted to build something that treated multi-cloud not as a stretch goal but as a first-class architectural constraint — where the networking, the service mesh, the observability, and the CI/CD pipeline are all designed from the start with the assumption that workloads span two different clouds with different APIs, different IAM models, and non-overlapping network spaces. This platform is the result of that.
 
 ---
 
