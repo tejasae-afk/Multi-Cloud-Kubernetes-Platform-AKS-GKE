@@ -5,9 +5,7 @@
 
 ## Motivation
 
-Most Kubernetes tutorials stop at a single cluster on a single cloud. The moment a real platform needs to survive a regional outage, serve traffic from multiple continents, or run on whichever cloud a customer mandates, the single-cluster model breaks. I built this to work through those problems hands-on — vendor lock-in at the infrastructure layer, mesh routing across network boundaries, and observability when your metrics live in two separate clouds.
-
-The secondary motivation was CI/CD without long-lived cloud credentials. OIDC-based authentication for GitHub Actions is the right approach but rarely shown end-to-end for both GCP and Azure in the same pipeline.
+Single-cluster tutorials don't survive a regional outage, a multi-continent user base, or a customer who mandates a specific cloud. I built this to work through those problems for real — not simulate them.
 
 ---
 
