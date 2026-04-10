@@ -2,12 +2,12 @@
 
 -
 
-## Checklist
+## Checks before merge
 
-- [ ] Terraform plan output looks sane
-- [ ] App builds finished cleanly
+- [ ] Terraform plan looks sane
+- [ ] App builds passed
 - [ ] Trivy scan passed with no HIGH or CRITICAL findings
-- [ ] Helm upgrade works on a real cluster
-- [ ] Smoke tests passed
-- [ ] Mesh checks still pass after the change
-- [ ] I didn't sneak in a local-only hack that breaks CI
+- [ ] GKE smoke test passed
+- [ ] AKS smoke test passed
+- [ ] Mesh verify passed if the change touched routing or Istio
+- [ ] I updated docs or follow-up TODOs if I changed the operator flow

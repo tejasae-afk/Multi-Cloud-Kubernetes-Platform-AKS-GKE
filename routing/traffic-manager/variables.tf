@@ -1,30 +1,35 @@
-variable "name_prefix" {
+variable "azure_subscription_id" {
   type        = string
-  description = "Short prefix used for routing resources."
-  default     = "mc-k8s"
-}
-
-variable "environment" {
-  type        = string
-  description = "Environment tag for the profile."
-  default     = "dev"
+  description = "Azure subscription ID that owns the Traffic Manager profile."
 }
 
 variable "resource_group_name" {
   type        = string
-  description = "Resource group used for Azure Traffic Manager."
-  default     = "mc-k8s-routing-rg"
+  description = "Resource group for Traffic Manager resources."
+  default     = "mc-k8s-edge-rg"
 }
 
-variable "resource_group_location" {
+variable "location" {
   type        = string
-  description = "Azure region for the resource group."
+  description = "Azure resource group location. Traffic Manager itself stays global."
   default     = "eastus"
 }
 
-variable "profile_relative_name" {
+variable "environment" {
   type        = string
-  description = "DNS relative name for the Traffic Manager profile."
+  description = "Environment tag value."
+  default     = "dev"
+}
+
+variable "profile_name" {
+  type        = string
+  description = "Traffic Manager profile name."
+  default     = null
+}
+
+variable "relative_name" {
+  type        = string
+  description = "DNS name prefix under trafficmanager.net."
   default     = "mc-k8s-edge"
 }
 
@@ -34,56 +39,90 @@ variable "dns_ttl" {
   default     = 30
 }
 
-variable "health_probe_path" {
+variable "monitor_protocol" {
   type        = string
-  description = "Path used by Traffic Manager to probe the public ingress."
+  description = "Health probe protocol."
+  default     = "HTTP"
+}
+
+variable "monitor_path" {
+  type        = string
+  description = "HTTP path used by Traffic Manager health probes."
   default     = "/healthz"
 }
 
-variable "probe_interval_seconds" {
+variable "monitor_port" {
+  type        = number
+  description = "HTTP port used by Traffic Manager health probes."
+  default     = 80
+}
+
+variable "monitor_interval_seconds" {
   type        = number
   description = "Traffic Manager probe interval."
   default     = 10
 }
 
-variable "probe_timeout_seconds" {
+variable "monitor_timeout_seconds" {
   type        = number
   description = "Traffic Manager probe timeout."
   default     = 5
 }
 
-variable "tolerated_failures" {
+variable "monitor_tolerated_failures" {
   type        = number
-  description = "Number of failed probes tolerated before failover."
-  default     = 1
+  description = "How many failed probes I tolerate before the endpoint drops out."
+  default     = 3
+}
+
+variable "public_zone_name" {
+  type        = string
+  description = "Azure DNS zone for the public hostname."
+  default     = "platform.example.com"
+}
+
+variable "public_zone_resource_group_name" {
+  type        = string
+  description = "Resource group that owns the public Azure DNS zone."
+  default     = "mc-k8s-dns-rg"
+}
+
+variable "public_record_name" {
+  type        = string
+  description = "Public hostname record name."
+  default     = "api"
+}
+
+variable "create_public_cname" {
+  type        = bool
+  description = "Create the public CNAME in Azure DNS."
+  default     = true
 }
 
 variable "gke_endpoint_fqdn" {
   type        = string
-  description = "Public hostname for the GKE ingress gateway."
-  default     = "gke-api.platform.haleops.net"
+  description = "Public DNS name that resolves to the GKE ingress gateway."
 }
 
 variable "aks_endpoint_fqdn" {
   type        = string
-  description = "Public hostname for the AKS ingress gateway."
-  default     = "aks-api.platform.haleops.net"
+  description = "Public DNS name that resolves to the AKS ingress gateway."
 }
 
 variable "gke_weight" {
   type        = number
-  description = "Traffic weight for GKE."
+  description = "Weighted routing value for the GKE endpoint."
   default     = 70
 }
 
 variable "aks_weight" {
   type        = number
-  description = "Traffic weight for AKS."
+  description = "Weighted routing value for the AKS endpoint."
   default     = 30
 }
 
-variable "shared_hostname" {
-  type        = string
-  description = "Friendly hostname that CNAMEs to the Traffic Manager profile."
-  default     = "api.platform.haleops.net"
+variable "extra_tags" {
+  type        = map(string)
+  description = "Extra tags merged into the default tag set."
+  default     = {}
 }

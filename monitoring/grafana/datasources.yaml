@@ -1,34 +1,32 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-datasources
-  namespace: monitoring
-  labels:
-    grafana_datasource: "1"
-    project: multi-cloud-k8s
-    environment: dev
-    managed-by: manifests
-data:
-  datasources.yaml: |
-    apiVersion: 1
-    datasources:
-      - name: Prometheus
-        uid: prometheus
-        type: prometheus
-        access: proxy
-        url: http://mc-kps-gke-prometheus.monitoring.svc.cluster.local:9090
-        editable: false
-        isDefault: false
-        jsonData:
-          httpMethod: POST
-      - name: Thanos
-        uid: thanos
-        type: prometheus
-        access: proxy
-        url: http://thanos-query.monitoring.svc.cluster.local:9090
-        editable: false
-        isDefault: true
-        jsonData:
-          httpMethod: POST
-          timeInterval: 15s
-          manageAlerts: true
+apiVersion: 1
+deleteDatasources:
+  - name: Prometheus GKE
+    orgId: 1
+  - name: Thanos Aggregated
+    orgId: 1
+prune: true
+datasources:
+  - name: Prometheus GKE
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+      timeInterval: 30s
+      manageAlerts: false
+  - name: Thanos Aggregated
+    uid: thanos
+    type: prometheus
+    access: proxy
+    url: ${THANOS_URL}
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+      timeInterval: 30s
+      manageAlerts: false

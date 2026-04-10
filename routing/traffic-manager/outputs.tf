@@ -1,27 +1,19 @@
 output "traffic_manager_profile_id" {
-  description = "Traffic Manager profile ID."
-  value       = azurerm_traffic_manager_profile.this.id
+  description = "Traffic Manager profile resource ID."
+  value       = azurerm_traffic_manager_profile.edge.id
 }
 
-output "traffic_manager_profile_name" {
-  description = "Traffic Manager profile name."
-  value       = azurerm_traffic_manager_profile.this.name
+output "traffic_manager_fqdn" {
+  description = "Public trafficmanager.net hostname."
+  value       = azurerm_traffic_manager_profile.edge.fqdn
 }
 
-output "traffic_manager_profile_fqdn" {
-  description = "Traffic Manager profile FQDN."
-  value       = azurerm_traffic_manager_profile.this.fqdn
+output "public_hostname" {
+  description = "Final public hostname if I let this module create the CNAME."
+  value       = var.create_public_cname ? "${var.public_record_name}.${var.public_zone_name}" : null
 }
 
-output "shared_hostname" {
-  description = "Public hostname that should point at the Traffic Manager profile."
-  value       = var.shared_hostname
-}
-
-output "cluster_endpoints" {
-  description = "Cluster-specific public hostnames behind Traffic Manager."
-  value = {
-    gke = azurerm_traffic_manager_external_endpoint.gke.target
-    aks = azurerm_traffic_manager_external_endpoint.aks.target
-  }
+output "azure_subscription_display_name" {
+  description = "Subscription display name, mostly handy when I forget which account the runner used."
+  value       = data.azurerm_subscription.current.display_name
 }

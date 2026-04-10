@@ -1,111 +1,79 @@
 name: nightly-tests
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: nightly-tests
-  cancel-in-progress: false
-
 jobs:
-  test:
-    runs-on:
-      - self-hosted
-      - platform
-      - linux
-
+  nightly:
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+      GKE_EDGE_HOST: ${{ vars.GKE_EDGE_HOST }}
+      AKS_EDGE_HOST: ${{ vars.AKS_EDGE_HOST }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.1
 
-      - name: Set kubeconfig contexts
+      - name: Auth and kubeconfig
         uses: ./.github/actions/setup-kubeconfig
         with:
-          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
-          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
-          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
-          gke-location: ${{ vars.GKE_LOCATION }}
-          gke-use-internal-ip: "true"
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
-          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp_service_account: ${{ vars.GCP_CICD_SERVICE_ACCOUNT }}
+          gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke_location: ${{ vars.GKE_LOCATION }}
+          azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
 
-      - name: Smoke tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./tests/smoke/test_endpoints.sh \
-            --context gke \
-            --namespace platform \
-            --base-url "https://${{ vars.GKE_APP_FQDN }}"
-          ./tests/smoke/test_endpoints.sh \
-            --context aks \
-            --namespace platform \
-            --base-url "https://${{ vars.AKS_APP_FQDN }}"
-          ./tests/smoke/test_metrics.sh \
-            --context gke \
-            --monitoring-namespace monitoring
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1.1.0
 
-      - name: Integration tests
-        shell: bash
+      - name: Install istioctl
         run: |
-          set -euo pipefail
-          ./tests/integration/test_cross_cluster.sh \
-            --shared-url "https://${{ vars.APP_FQDN }}" \
-            --gke-url "https://${{ vars.GKE_APP_FQDN }}" \
-            --aks-url "https://${{ vars.AKS_APP_FQDN }}"
-          ./tests/integration/test_mesh_routing.sh \
-            --shared-url "https://${{ vars.APP_FQDN }}/api/health" \
-            --gke-host "${{ vars.GKE_APP_FQDN }}" \
-            --aks-host "${{ vars.AKS_APP_FQDN }}"
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 TARGET_ARCH=x86_64 sh -
+          echo "$PWD/istio-1.29.1/bin" >> "$GITHUB_PATH"
 
-      - name: Mesh verify
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./mesh/scripts/verify-mesh.sh
-          ./mesh/scripts/debug-mesh.sh > nightly-mesh-debug.txt || true
+      - name: Smoke endpoints on GKE
+        run: tests/smoke/test_endpoints.sh --context gke --namespace platform --release-name mc-platform
 
-      - name: Failover test
-        shell: bash
-        run: |
-          set -euo pipefail
-          SHARED_URL="https://${{ vars.APP_FQDN }}/api/health" \
-          GKE_HOST="${{ vars.GKE_APP_FQDN }}" \
-          AKS_HOST="${{ vars.AKS_APP_FQDN }}" \
-          ./routing/scripts/test-failover.sh
+      - name: Smoke endpoints on AKS
+        run: tests/smoke/test_endpoints.sh --context aks --namespace platform --release-name mc-platform
+
+      - name: Smoke metrics
+        run: tests/smoke/test_metrics.sh --context gke --namespace monitoring
+
+      - name: Cross-cluster integration
+        run: tests/integration/test_cross_cluster.sh --context-gke gke --context-aks aks --public-host "$PUBLIC_HOST"
+
+      - name: Mesh routing integration
+        run: tests/integration/test_mesh_routing.sh --public-host "$PUBLIC_HOST"
+
+      - name: Failover integration
+        run: tests/integration/test_failover.sh --public-host "$PUBLIC_HOST"
 
       - name: Load test
-        shell: bash
-        run: |
-          set -euo pipefail
-          TARGET_URL="https://${{ vars.APP_FQDN }}" ./tests/load/run-load-test.sh
+        run: tests/load/run-load-test.sh --base-url "http://${PUBLIC_HOST}" --host-header "$PUBLIC_HOST"
 
-      - name: Policy checks
-        shell: bash
+      - name: Policy tests
         run: |
-          set -euo pipefail
-          docker run --rm \
-            -v "$PWD:/src" \
-            -w /src \
-            openpolicyagent/conftest:v0.66.0 \
-            test -p tests/policy/opa-policies \
-            helm mesh routing monitoring
+          docker run --rm             -v "$PWD:/work"             -w /work             openpolicyagent/conftest:v0.64.0             test --policy tests/policy/opa-policies helm mesh monitoring routing
 
       - name: Upload nightly artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-test-artifacts
+          name: nightly-results
           path: |
-            nightly-mesh-debug.txt
             tests/load/results
+            routing/health-checks/synthetic-monitor.log

@@ -3,61 +3,68 @@ fullnameOverride: external-dns
 provider:
   name: google
 
+serviceAccount:
+  create: true
+  name: external-dns
+  annotations:
+    iam.gke.io/gcp-service-account: external-dns@mc-k8s-platform-dev.iam.gserviceaccount.com
+
 sources:
   - service
   - istio-gateway
   - istio-virtualservice
 
-domainFilters:
-  - platform.haleops.net
-
-registry: txt
-txtOwnerId: mc-k8s-gke
-txtPrefix: txt-
 policy: upsert-only
-interval: 30s
+registry: txt
+txtOwnerId: mc-k8s-gke-external-dns
+txtPrefix: txt-
+domainFilters:
+  - gcp.platform.example.com
+
+extraArgs:
+  google-project: mc-k8s-platform-dev
+  google-batch-change-size: "1000"
+  publish-internal-services: "false"
+  events: "true"
+
+interval: 1m
 triggerLoopOnEvent: true
-logLevel: info
 logFormat: json
-
-serviceAccount:
-  create: true
-  name: external-dns
-  annotations:
-    iam.gke.io/gcp-service-account: external-dns@multi-cloud-k8s.iam.gserviceaccount.com
-
-podLabels:
-  platform.haleops.net/cluster: gke
+logLevel: info
 
 nodeSelector:
   iam.gke.io/gke-metadata-server-enabled: "true"
 
-extraArgs:
-  - --google-project=multi-cloud-k8s
-  - --annotation-filter=external-dns.alpha.kubernetes.io/public in (true)
-  - --events
-  - --txt-cache-interval=1m
-
-rbac:
-  create: true
-
-serviceMonitor:
-  enabled: true
-  interval: 30s
-  additionalLabels:
-    release: kube-prometheus-stack
-
 resources:
   requests:
     cpu: 50m
-    memory: 128Mi
+    memory: 64Mi
   limits:
     cpu: 250m
     memory: 256Mi
 
+serviceMonitor:
+  enabled: true
+
+rbac:
+  create: true
+  additionalPermissions:
+    - apiGroups:
+        - networking.istio.io
+      resources:
+        - gateways
+        - virtualservices
+      verbs:
+        - get
+        - list
+        - watch
+
+podLabels:
+  app.kubernetes.io/part-of: multi-cloud-k8s
+
 topologySpreadConstraints:
   - maxSkew: 1
-    topologyKey: kubernetes.io/hostname
+    topologyKey: topology.kubernetes.io/zone
     whenUnsatisfiable: ScheduleAnyway
     labelSelector:
       matchLabels:

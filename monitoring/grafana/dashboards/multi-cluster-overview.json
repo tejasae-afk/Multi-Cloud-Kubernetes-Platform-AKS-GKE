@@ -1,32 +1,109 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": null,
   "links": [],
   "liveNow": false,
   "panels": [
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "thanos"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "id": 2,
-      "type": "stat",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m]))",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
       "title": "total req/s",
-      "description": "This is my top-line app traffic number across both clusters.",
+      "type": "stat"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 6,
-        "h": 4
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -36,61 +113,67 @@
               },
               {
                 "color": "orange",
-                "value": 20
+                "value": 1
               },
               {
                 "color": "red",
-                "value": 50
+                "value": 5
               }
             ]
           },
-          "color": {
-            "mode": "thresholds"
-          }
+          "unit": "percentunit"
         },
         "overrides": []
       },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "expr": "sum(rate(mcplatform_http_requests_total{cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "error rate",
-      "description": "I kept this on 5xx only so a couple of test 404s do not make the whole page look broken.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "thanos"
-      },
       "gridPos": {
+        "h": 4,
+        "w": 6,
         "x": 6,
-        "y": 0,
-        "w": 6,
-        "h": 4
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(istio_requests_total{reporter=\"destination\", response_code=~\"5..\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m])) / clamp_min(sum(rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m])), 0.001)",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "error rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "thanos"
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -108,76 +191,17 @@
               }
             ]
           },
-          "color": {
-            "mode": "thresholds"
-          }
+          "unit": "ms"
         },
         "overrides": []
       },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
       },
-      "targets": [
-        {
-          "expr": "100 * sum(rate(mcplatform_http_requests_total{cluster=~\"$cluster\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(mcplatform_http_requests_total{cluster=~\"$cluster\"}[5m])), 0.001)",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ]
-    },
-    {
       "id": 7,
-      "type": "stat",
-      "title": "p95 latency",
-      "description": "App latency tends to tell me faster than logs when cross-cluster routing starts getting weird.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "thanos"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 6,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.5
-              },
-              {
-                "color": "red",
-                "value": 1.5
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -190,40 +214,41 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
-        "wideLayout": true
+        "textMode": "auto"
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(mcplatform_http_request_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(istio_request_duration_milliseconds_bucket{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m])))",
           "legendFormat": "",
+          "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "p95 latency",
+      "type": "stat"
     },
     {
-      "id": 12,
-      "type": "stat",
-      "title": "cross-cluster req/s",
-      "description": "This one stays low on purpose, but if it drops to zero during a test I know discovery or routing fell over.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 18,
-        "y": 0,
-        "w": 6,
-        "h": 4
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
@@ -231,17 +256,22 @@
                 "value": 1
               },
               {
-                "color": "green",
+                "color": "red",
                 "value": 5
               }
             ]
           },
-          "color": {
-            "mode": "thresholds"
-          }
+          "unit": "none"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 12,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -254,35 +284,120 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
-        "wideLayout": true
+        "textMode": "auto"
       },
       "targets": [
         {
-          "expr": "sum(rate(istio_requests_total{source_cluster!=\"\",destination_cluster!=\"\",source_cluster!=\"destination_cluster\",cluster=~\"$cluster\"}[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          },
+          "editorMode": "code",
+          "expr": "count(count by (cluster) (up{cluster=~\"$cluster\"}))",
           "legendFormat": "",
+          "range": true,
           "refId": "A"
         }
-      ]
+      ],
+      "title": "active clusters",
+      "type": "stat"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "thanos"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "id": 15,
-      "type": "timeseries",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (cluster) (rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m]))",
+          "legendFormat": "{{cluster}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
+        }
+      ],
       "title": "request rate by cluster",
-      "description": "I look here first when one cloud starts carrying more than I expected.",
+      "type": "timeseries"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 12,
-        "h": 8
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
           "color": {
             "mode": "palette-classic"
           },
@@ -294,7 +409,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 20,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -304,7 +419,7 @@
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 2,
-            "pointSize": 3,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -318,112 +433,30 @@
               "mode": "off"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "percentunit"
         },
         "overrides": []
       },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (cluster) (rate(mcplatform_http_requests_total{cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "{{cluster}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 21,
-      "type": "timeseries",
-      "title": "error rate by cluster",
-      "description": "This catches one-side failures better than the global stat does.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "thanos"
-      },
       "gridPos": {
+        "h": 8,
+        "w": 12,
         "x": 12,
-        "y": 4,
-        "w": 12,
-        "h": 8
+        "y": 4
       },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 3,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "id": 21,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -435,30 +468,25 @@
       },
       "targets": [
         {
-          "expr": "100 * sum by (cluster) (rate(mcplatform_http_requests_total{cluster=~\"$cluster\",status_code=~\"5..\"}[5m])) / clamp_min(sum by (cluster) (rate(mcplatform_http_requests_total{cluster=~\"$cluster\"}[5m])), 0.001)",
+          "expr": "100 * sum by (cluster) (rate(istio_requests_total{reporter=\"destination\", response_code=~\"5..\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m])) / clamp_min(sum by (cluster) (rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m])), 0.001)",
           "legendFormat": "{{cluster}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
-      ]
+      ],
+      "title": "5xx rate by cluster",
+      "type": "timeseries"
     },
     {
-      "id": 28,
-      "type": "timeseries",
-      "title": "req/s by svc",
-      "description": "I left the title short because that is how this panel ended up after a late-night edit.",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
-      "gridPos": {
-        "x": 0,
-        "y": 12,
-        "w": 12,
-        "h": 8
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
           "color": {
             "mode": "palette-classic"
           },
@@ -470,7 +498,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 20,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -480,7 +508,7 @@
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 2,
-            "pointSize": 3,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -494,24 +522,30 @@
               "mode": "off"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "reqps"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 24,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -523,30 +557,82 @@
       },
       "targets": [
         {
-          "expr": "sum by (service) (rate(mcplatform_http_requests_total{cluster=~\"$cluster\"}[5m]))",
-          "legendFormat": "{{service}}",
-          "refId": "A"
+          "expr": "sum by (destination_workload) (rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=~\"api-gateway|order-service|inventory-service\"}[5m]))",
+          "legendFormat": "{{destination_workload}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
         }
-      ]
+      ],
+      "title": "req/s by svc",
+      "type": "timeseries"
     },
     {
-      "id": 33,
-      "type": "timeseries",
-      "title": "p95 latency by cluster",
-      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "thanos"
       },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
       "gridPos": {
-        "x": 12,
-        "y": 12,
+        "h": 8,
         "w": 12,
-        "h": 8
+        "x": 12,
+        "y": 12
+      },
+      "id": 28,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "100 * sum by (cluster) (rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=\"api-gateway\"}[5m])) / clamp_min(sum(rate(istio_requests_total{reporter=\"destination\", cluster=~\"$cluster\", destination_workload=\"api-gateway\"}[5m])), 0.001)",
+          "legendFormat": "{{cluster}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
+          }
+        }
+      ],
+      "title": "traffic split by cluster",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "thanos"
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
           "color": {
             "mode": "palette-classic"
           },
@@ -558,7 +644,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 20,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -568,7 +654,7 @@
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 2,
-            "pointSize": 3,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -582,24 +668,30 @@
               "mode": "off"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "reqps"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 31,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -611,98 +703,56 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (cluster, le) (rate(mcplatform_http_request_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))",
+          "expr": "sum by (cluster) (rate(prometheus_remote_storage_samples_in_total{cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{cluster}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 41,
-      "type": "table",
-      "title": "top routes right now",
-      "description": "This keeps me honest when I think a route is quiet and it is not.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "thanos"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 20,
-        "w": 24,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true,
-        "sortBy": [
-          {
-            "displayName": "Value",
-            "desc": true
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "thanos"
           }
-        ]
-      },
-      "targets": [
-        {
-          "expr": "topk(10, sum by (cluster, service, route) (rate(mcplatform_http_requests_total{cluster=~\"$cluster\"}[5m])))",
-          "legendFormat": "{{cluster}} {{service}} {{route}}",
-          "refId": "A"
         }
       ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {}
-        }
-      ]
+      "title": "remote write samples from AKS",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 41,
+  "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "monitoring",
-    "platform",
+    "multi-cloud",
     "overview"
   ],
   "templating": {
     "list": [
       {
-        "name": "cluster",
-        "label": "cluster",
-        "type": "query",
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "datasource": {
           "type": "prometheus",
           "uid": "thanos"
         },
         "definition": "label_values(up, cluster)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "cluster",
+        "multi": false,
+        "name": "cluster",
+        "options": [],
         "query": {
+          "qryType": 1,
           "query": "label_values(up, cluster)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
         "sort": 1,
-        "hide": 0,
-        "includeAll": true,
-        "allValue": ".*",
-        "multi": false,
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        }
+        "type": "query"
       }
     ]
   },
@@ -711,7 +761,7 @@
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "Multi-cluster overview",
   "uid": "multi-cluster-overview",
   "version": 1,

@@ -1,84 +1,62 @@
-# monitoring
+# Monitoring
 
-I wanted one place to look when traffic started bouncing between GKE and AKS, so I parked the central view in GKE and pushed AKS metrics into it. Prometheus still runs in both clusters. I just stopped pretending a pull model was worth the network pain for two clusters that live behind different cloud load balancers.
+I kept monitoring centered on GKE. That was an arbitrary pick, but once I made it the rest got simpler: GKE runs the local Prometheus stack, Thanos Receive, Thanos Query, and Grafana. AKS keeps its own Prometheus for local scraping and pushes a trimmed metric set back to GKE.
 
-## Layout
+I didn't bother with federation. Pulling across clouds got annoying fast once NAT, separate load balancers, and scrape auth were in the mix. Remote write let AKS push outward and kept the connection pattern boring.
 
-- GKE runs kube-prometheus-stack, a Thanos sidecar on Prometheus, Thanos Receive, Thanos Query, and Grafana.
-- AKS runs kube-prometheus-stack and remote writes into the GKE Thanos Receive service.
-- Grafana talks to two datasources:
-  - `prometheus` for the local GKE Prometheus
-  - `thanos` for the aggregated view across both clusters
+## What lives where
 
-I kept the monitoring namespace out of sidecar injection on purpose. Once Istio got into this path, scrape timing and bootstrap noise got harder to reason about than the app traffic I was trying to watch.
+- **GKE**: kube-prometheus-stack, Thanos sidecar on Prometheus, Thanos Receive, Thanos Query, Grafana
+- **AKS**: kube-prometheus-stack with `remoteWrite` back to GKE
+- **Both clusters**: ServiceMonitors for `api-gateway`, `order-service`, and `inventory-service`, plus the same alert rules
 
 ## Install notes
 
-I install this stack with `scripts/install-monitoring.sh`. The script does a few annoying things for me:
+I install the monitoring stack in this order:
 
-1. creates the `monitoring` namespace on both clusters
-2. installs kube-prometheus-stack on GKE
-3. deploys Thanos Receive and Thanos Query on GKE
-4. waits for the GKE receive load balancer address
-5. creates the basic auth secrets on both sides
-6. patches the AKS `remote_write` target with the live GKE address
-7. installs kube-prometheus-stack on AKS
-8. applies ServiceMonitors, recording rules, and alerts
-9. loads Grafana datasources and dashboard ConfigMaps
-10. installs Grafana on GKE
+1. GKE kube-prometheus-stack
+2. GKE Thanos Receive and Query
+3. AKS kube-prometheus-stack with remote write pointed at GKE
+4. Grafana on GKE
+5. Dashboard and datasource ConfigMaps
 
-I left Grafana out of kube-prometheus-stack because I only wanted one Grafana release, one set of dashboards, and one place to log in.
+That install order matters because I want the GKE receive endpoint up before AKS starts shipping samples.
+
+```bash
+./monitoring/scripts/install-monitoring.sh \
+  --gke-context gke_us_central1_mc-k8s-gke-cluster \
+  --aks-context mc-k8s-aks-admin \
+  --monitoring-namespace monitoring \
+  --app-namespace platform
+```
 
 ## Grafana access
 
-I kept access boring:
-
 ```bash
-./monitoring/scripts/port-forward-grafana.sh
+./monitoring/scripts/port-forward-grafana.sh \
+  --context gke_us_central1_mc-k8s-gke-cluster \
+  --namespace monitoring
 ```
 
-That forwards `http://127.0.0.1:3000` to the Grafana service in GKE.
+That prints the URL plus the current admin username and password from the cluster secret.
 
-Default lab creds:
+## Datasources
 
-- user: `admin`
-- password: `admin`
+I keep two datasources in Grafana:
 
-## Datasource config
+- `uid: prometheus` points at the local GKE Prometheus service. I mostly keep it around when I want to compare raw local scrape data.
+- `uid: thanos` points at Thanos Query. That's the one the dashboards use for the cross-cluster view because it can see GKE through the sidecar and AKS through Thanos Receive.
 
-The datasource ConfigMap lives in `grafana/datasources.yaml`.
+## A couple of choices I made on purpose
 
-- `prometheus` points at `http://mc-kps-gke-prometheus.monitoring.svc.cluster.local:9090`
-- `thanos` points at `http://thanos-query.monitoring.svc.cluster.local:9090`
+- I started with just Thanos Receive. That wasn't enough. Grafana still needs a PromQL API, so `prometheus/thanos-receive.yaml` also brings up a tiny Thanos Query deployment.
+- I only remote-write the metric families I care about from AKS. Shipping every single series back across clouds got noisy and more expensive than I wanted.
+- I kept object storage, compactor, and store gateway out of this phase. Two clusters didn't justify that much machinery yet.
+- The receive endpoint uses a shared header token behind a tiny nginx proxy. That's good enough for a dev setup. If I keep this running longer, I'd move it behind private connectivity or a real auth layer.
 
-The dashboards use `thanos` by default because I wanted the `cluster` dropdown to filter both GKE and AKS without keeping two copies of every panel around.
+## Files I keep touching
 
-## What bit me
-
-- I forgot that Thanos Receive is not the thing Grafana should query. Receive speaks the write path and StoreAPI, so I needed a tiny Query deployment in front of it.
-- I had remote write auth half-wired once. Prometheus in AKS just kept retrying and the queue grew until I fixed the secret names on both ends.
-- I loaded dashboards before I added external labels on both Prometheus servers. The `cluster` variable came up empty and every panel looked broken.
-- I let Istio inject into `monitoring` one time. Nothing exploded, but scrape timings drifted enough that I ripped that back out fast.
-
-## Files I touch the most
-
-- `prometheus/values-gke.yaml`
-- `prometheus/values-aks.yaml`
-- `prometheus/thanos-receive.yaml`
-- `grafana/values.yaml`
-- `grafana/datasources.yaml`
-- `scripts/install-monitoring.sh`
-- `scripts/generate-traffic.sh`
-
-## Quick checks after install
-
-```bash
-kubectl --context "$GKE_CONTEXT" -n monitoring get pods
-kubectl --context "$AKS_CONTEXT" -n monitoring get pods
-kubectl --context "$GKE_CONTEXT" -n monitoring get svc thanos-receive-public
-kubectl --context "$AKS_CONTEXT" -n monitoring get secret thanos-remote-write-auth
-kubectl --context "$GKE_CONTEXT" -n monitoring logs deploy/thanos-query --tail=50
-kubectl --context "$GKE_CONTEXT" -n monitoring logs deploy/thanos-receive -c thanos --tail=50
-```
-
-If the dashboards are flat, I run `scripts/generate-traffic.sh` and then check the `thanos` datasource first. That catches most bad wiring in a couple of minutes.
+- `prometheus/values-gke.yaml` and `prometheus/values-aks.yaml` for scrape jobs, rule selectors, and remote write
+- `prometheus/thanos-receive.yaml` for Receive, Query, the hashring, and the receive auth proxy
+- `grafana/dashboards/*.json` for the four dashboards I actually stare at
+- `scripts/generate-traffic.sh` when I want the graphs to look alive instead of flat

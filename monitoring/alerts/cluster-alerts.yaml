@@ -4,44 +4,44 @@ metadata:
   name: cluster-alerts
   namespace: monitoring
   labels:
+    release: mc-monitoring
     project: multi-cloud-k8s
     environment: dev
-    managed-by: manifests
+    managed-by: kubectl
 spec:
   groups:
-    - name: cluster-alerts
+    - name: cluster-health
       rules:
         - alert: PodCrashLooping
           expr: |
             sum by (namespace, pod) (
-              increase(kube_pod_container_status_restarts_total[15m])
+              increase(kube_pod_container_status_restarts_total{namespace=~"platform|istio-system"}[15m])
             ) > 3
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: pod keeps restarting
-            description: "{{ $labels.namespace }}/{{ $labels.pod }} restarted more than three times in 15 minutes."
-        - alert: HighNodeCpuUsage
+            summary: Pod is restarting too much
+            description: '{{ $labels.namespace }}/{{ $labels.pod }} restarted more than 3 times in 15 minutes.'
+        - alert: NodeCpuHigh
           expr: |
-            (
-              100 *
-              sum by (instance) (rate(node_cpu_seconds_total{mode!="idle"}[5m]))
-              /
-              sum by (instance) (rate(node_cpu_seconds_total[5m]))
-            ) > 80
+            100 * (1 - avg by (instance) (
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            )) > 80
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: node CPU is hot
-            description: "{{ $labels.instance }} stayed above 80 percent CPU for 10 minutes."
+            summary: Node CPU is running hot
+            description: '{{ $labels.instance }} stayed above 80% CPU for 10 minutes.'
         - alert: NodeNotReady
           expr: |
-            kube_node_status_condition{condition="Ready", status="true"} == 0
-          for: 10m
+            max by (node) (
+              kube_node_status_condition{condition="Ready", status="true"} == 0
+            ) > 0
+          for: 5m
           labels:
             severity: critical
           annotations:
-            summary: node not ready
-            description: "{{ $labels.node }} has not been Ready for 10 minutes."
+            summary: Node is not Ready
+            description: '{{ $labels.node }} has not been Ready for 5 minutes.'

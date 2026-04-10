@@ -1,0 +1,26 @@
+{
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "editor.formatOnSave": true,
+  "editor.tabSize": 2,
+  "[terraform]": {
+    "editor.defaultFormatter": "hashicorp.terraform"
+  },
+  "[terraform-vars]": {
+    "editor.defaultFormatter": "hashicorp.terraform"
+  },
+  "[go]": {
+    "editor.defaultFormatter": "golang.go"
+  },
+  "go.useLanguageServer": true,
+  "go.formatTool": "gofmt",
+  "go.toolsManagement.autoUpdate": true,
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+  "python.analysis.typeCheckingMode": "basic",
+  "python.linting.enabled": true,
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestEnabled": false,
+  "yaml.format.enable": true
+}

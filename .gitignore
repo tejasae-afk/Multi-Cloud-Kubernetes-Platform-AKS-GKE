@@ -50,7 +50,8 @@ venv/
 
 # IDEs
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.iml
 
 # OS junk

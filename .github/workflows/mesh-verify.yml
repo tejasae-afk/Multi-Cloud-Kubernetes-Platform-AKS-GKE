@@ -1,12 +1,12 @@
 name: mesh-verify
 
 on:
-  workflow_dispatch:
   workflow_run:
     workflows:
       - deploy
     types:
       - completed
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,32 +15,39 @@ permissions:
 jobs:
   verify:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    runs-on:
-      - self-hosted
-      - platform
-      - linux
-
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.1
 
-      - name: Set kubeconfig contexts
+      - name: Auth and kubeconfig
         uses: ./.github/actions/setup-kubeconfig
         with:
-          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
-          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
-          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
-          gke-location: ${{ vars.GKE_LOCATION }}
-          gke-use-internal-ip: "true"
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
-          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp_service_account: ${{ vars.GCP_CICD_SERVICE_ACCOUNT }}
+          gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke_location: ${{ vars.GKE_LOCATION }}
+          azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Install istioctl
+        run: |
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 TARGET_ARCH=x86_64 sh -
+          echo "$PWD/istio-1.29.1/bin" >> "$GITHUB_PATH"
 
       - name: Verify mesh
-        shell: bash
         run: |
-          set -euo pipefail
-          ./mesh/scripts/verify-mesh.sh
+          ./mesh/scripts/verify-mesh.sh             --context-gke gke             --context-aks aks             --app-namespace platform             --istio-version 1.29.1 | tee mesh-verify.txt
+
+      - name: Upload verify output
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesh-verify
+          path: mesh-verify.txt

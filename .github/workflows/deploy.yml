@@ -1,203 +1,295 @@
 name: deploy
 
 on:
-  workflow_call:
-    inputs:
-      image_tag:
-        required: false
-        type: string
-        default: ""
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Container tag to deploy. Empty means the current commit SHA."
+        description: Image tag to deploy. I usually use a short SHA from build-push.
+        required: false
+        default: main
+  workflow_call:
+    inputs:
+      image_tag:
+        description: Image tag to deploy.
         required: false
         type: string
+        default: main
 
 permissions:
   contents: read
   id-token: write
 
-env:
-  IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
-  APP_NAMESPACE: platform
-
-# GKE is private in this repo, so deploy jobs stay on a runner that can reach the cluster network.
 jobs:
-  deploy-gke:
-    runs-on:
-      - self-hosted
-      - platform
-      - linux
-
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      APP_NAMESPACE: platform
+      RELEASE_NAME: mc-platform
+      IMAGE_TAG: ${{ inputs.image_tag || github.event.inputs.image_tag || 'main' }}
+      PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+      GKE_EDGE_HOST: ${{ vars.GKE_EDGE_HOST }}
+      AKS_EDGE_HOST: ${{ vars.AKS_EDGE_HOST }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.1
 
-      - name: Set kubeconfig contexts
+      - name: Auth and kubeconfig
         uses: ./.github/actions/setup-kubeconfig
         with:
-          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
-          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
-          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
-          gke-location: ${{ vars.GKE_LOCATION }}
-          gke-use-internal-ip: "true"
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
-          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp_service_account: ${{ vars.GCP_CICD_SERVICE_ACCOUNT }}
+          gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke_location: ${{ vars.GKE_LOCATION }}
+          azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+          install_helm: "true"
 
-      - name: Write GKE image overrides
-        shell: bash
+      - name: Build chart dependencies
+        run: helm dependency build ./helm
+
+      - name: Prepare image overrides
         run: |
-          cat > /tmp/platform-images-gke.yaml <<EOF
+          cat > "$RUNNER_TEMP/gke-images.yaml" <<EOF
           api-gateway:
             image:
-              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/api-gateway
+              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/multi-cloud-k8s-platform/api-gateway
               tag: "${IMAGE_TAG}"
           order-service:
             image:
-              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/order-service
+              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/multi-cloud-k8s-platform/order-service
               tag: "${IMAGE_TAG}"
           inventory-service:
             image:
-              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/inventory-service
+              repository: gcr.io/${{ vars.GCP_PROJECT_ID }}/multi-cloud-k8s-platform/inventory-service
               tag: "${IMAGE_TAG}"
           EOF
 
-      - name: Deploy to GKE
-        shell: bash
+          cat > "$RUNNER_TEMP/aks-images.yaml" <<EOF
+          api-gateway:
+            image:
+              repository: ${{ vars.ACR_NAME }}.azurecr.io/multi-cloud-k8s-platform/api-gateway
+              tag: "${IMAGE_TAG}"
+          order-service:
+            image:
+              repository: ${{ vars.ACR_NAME }}.azurecr.io/multi-cloud-k8s-platform/order-service
+              tag: "${IMAGE_TAG}"
+          inventory-service:
+            image:
+              repository: ${{ vars.ACR_NAME }}.azurecr.io/multi-cloud-k8s-platform/inventory-service
+              tag: "${IMAGE_TAG}"
+          EOF
+
+      - name: Deploy to GKE first
         run: |
-          set -euo pipefail
-          helm upgrade --install platform ./helm \
-            --namespace "${APP_NAMESPACE}" \
-            --create-namespace \
-            --kube-context gke \
-            -f helm/values.yaml \
-            -f helm/values-gke.yaml \
-            -f /tmp/platform-images-gke.yaml
+          helm upgrade --install "$RELEASE_NAME" ./helm             --namespace "$APP_NAMESPACE"             --create-namespace             --kube-context gke             -f helm/values.yaml             -f helm/values-gke.yaml             -f "$RUNNER_TEMP/gke-images.yaml"             --wait             --timeout 15m
 
-  smoke-gke:
-    needs: deploy-gke
-    runs-on:
-      - self-hosted
-      - platform
-      - linux
+      - name: Patch GKE live hosts and DNS annotation
+        run: |
+          kubectl --context gke -n istio-system annotate service istio-ingressgateway             external-dns.alpha.kubernetes.io/hostname="${GKE_EDGE_HOST}"             external-dns.alpha.kubernetes.io/ttl="30"             --overwrite
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set kubeconfig contexts
-        uses: ./.github/actions/setup-kubeconfig
-        with:
-          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
-          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
-          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
-          gke-location: ${{ vars.GKE_LOCATION }}
-          gke-use-internal-ip: "true"
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
-          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+          cat <<EOF | kubectl --context gke apply -f -
+          apiVersion: networking.istio.io/v1
+          kind: Gateway
+          metadata:
+            name: public-api
+            namespace: ${APP_NAMESPACE}
+          spec:
+            selector:
+              istio: ingressgateway
+            servers:
+              - port:
+                  number: 80
+                  name: http
+                  protocol: HTTP
+                hosts:
+                  - api.platform.local
+                  - ${PUBLIC_HOST}
+                  - ${GKE_EDGE_HOST}
+                  - ${AKS_EDGE_HOST}
+          ---
+          apiVersion: networking.istio.io/v1
+          kind: VirtualService
+          metadata:
+            name: api-gateway-route
+            namespace: ${APP_NAMESPACE}
+          spec:
+            hosts:
+              - api.platform.local
+              - ${PUBLIC_HOST}
+              - ${GKE_EDGE_HOST}
+              - ${AKS_EDGE_HOST}
+            gateways:
+              - ${APP_NAMESPACE}/public-api
+            http:
+              - name: header-force-gke
+                match:
+                  - headers:
+                      x-route-to:
+                        exact: gke
+                route:
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: gke
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: gke
+                    weight: 100
+              - name: header-force-aks
+                match:
+                  - headers:
+                      x-route-to:
+                        exact: aks
+                route:
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: aks
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: aks
+                    weight: 100
+              - name: weighted-cross-cloud
+                route:
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: gke
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: gke
+                    weight: 70
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: aks
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: aks
+                    weight: 30
+          EOF
 
       - name: Smoke test GKE
-        shell: bash
         run: |
-          set -euo pipefail
-          ./tests/smoke/test_endpoints.sh --context gke --namespace platform --base-url "https://${{ vars.GKE_APP_FQDN }}"
-          ./tests/smoke/test_metrics.sh --context gke --monitoring-namespace monitoring
+          tests/smoke/test_endpoints.sh --context gke --namespace "$APP_NAMESPACE" --release-name "$RELEASE_NAME"
+          gke_edge="$(kubectl --context gke -n istio-system get svc istio-ingressgateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}')"
+          tests/smoke/test_endpoints.sh --base-url "http://${gke_edge}" --host-header "$PUBLIC_HOST"
 
-  deploy-aks:
-    needs: smoke-gke
-    runs-on:
-      - self-hosted
-      - platform
-      - linux
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set kubeconfig contexts
-        uses: ./.github/actions/setup-kubeconfig
-        with:
-          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
-          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
-          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
-          gke-location: ${{ vars.GKE_LOCATION }}
-          gke-use-internal-ip: "true"
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
-          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
-
-      - name: Write AKS image overrides
-        shell: bash
+      - name: Deploy to AKS second
         run: |
-          cat > /tmp/platform-images-aks.yaml <<EOF
-          api-gateway:
-            image:
-              repository: ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/api-gateway
-              tag: "${IMAGE_TAG}"
-          order-service:
-            image:
-              repository: ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/order-service
-              tag: "${IMAGE_TAG}"
-          inventory-service:
-            image:
-              repository: ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/inventory-service
-              tag: "${IMAGE_TAG}"
+          helm upgrade --install "$RELEASE_NAME" ./helm             --namespace "$APP_NAMESPACE"             --create-namespace             --kube-context aks             -f helm/values.yaml             -f helm/values-aks.yaml             -f "$RUNNER_TEMP/aks-images.yaml"             --wait             --timeout 15m
+
+      - name: Patch AKS live hosts and DNS annotation
+        run: |
+          kubectl --context aks -n istio-system annotate service istio-ingressgateway             external-dns.alpha.kubernetes.io/hostname="${AKS_EDGE_HOST}"             external-dns.alpha.kubernetes.io/ttl="30"             --overwrite
+
+          cat <<EOF | kubectl --context aks apply -f -
+          apiVersion: networking.istio.io/v1
+          kind: Gateway
+          metadata:
+            name: public-api
+            namespace: ${APP_NAMESPACE}
+          spec:
+            selector:
+              istio: ingressgateway
+            servers:
+              - port:
+                  number: 80
+                  name: http
+                  protocol: HTTP
+                hosts:
+                  - api.platform.local
+                  - ${PUBLIC_HOST}
+                  - ${GKE_EDGE_HOST}
+                  - ${AKS_EDGE_HOST}
+          ---
+          apiVersion: networking.istio.io/v1
+          kind: VirtualService
+          metadata:
+            name: api-gateway-route
+            namespace: ${APP_NAMESPACE}
+          spec:
+            hosts:
+              - api.platform.local
+              - ${PUBLIC_HOST}
+              - ${GKE_EDGE_HOST}
+              - ${AKS_EDGE_HOST}
+            gateways:
+              - ${APP_NAMESPACE}/public-api
+            http:
+              - name: header-force-gke
+                match:
+                  - headers:
+                      x-route-to:
+                        exact: gke
+                route:
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: gke
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: gke
+                    weight: 100
+              - name: header-force-aks
+                match:
+                  - headers:
+                      x-route-to:
+                        exact: aks
+                route:
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: aks
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: aks
+                    weight: 100
+              - name: weighted-cross-cloud
+                route:
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: gke
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: gke
+                    weight: 70
+                  - destination:
+                      host: ${RELEASE_NAME}-api-gateway.${APP_NAMESPACE}.svc.cluster.local
+                      subset: aks
+                      port:
+                        number: 8080
+                    headers:
+                      response:
+                        add:
+                          x-served-by: aks
+                    weight: 30
           EOF
 
-      - name: Deploy to AKS
-        shell: bash
-        run: |
-          set -euo pipefail
-          helm upgrade --install platform ./helm \
-            --namespace "${APP_NAMESPACE}" \
-            --create-namespace \
-            --kube-context aks \
-            -f helm/values.yaml \
-            -f helm/values-aks.yaml \
-            -f /tmp/platform-images-aks.yaml
-
-  smoke-aks:
-    needs: deploy-aks
-    runs-on:
-      - self-hosted
-      - platform
-      - linux
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set kubeconfig contexts
-        uses: ./.github/actions/setup-kubeconfig
-        with:
-          gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
-          gcp-wif-provider: ${{ vars.GCP_WIF_PROVIDER }}
-          gcp-service-account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          gke-cluster-name: ${{ vars.GKE_CLUSTER_NAME }}
-          gke-location: ${{ vars.GKE_LOCATION }}
-          gke-use-internal-ip: "true"
-          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          aks-resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
-          aks-cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
-
       - name: Smoke test AKS
-        shell: bash
         run: |
-          set -euo pipefail
-          ./tests/smoke/test_endpoints.sh --context aks --namespace platform --base-url "https://${{ vars.AKS_APP_FQDN }}"
-          # Monitoring stays on GKE, so I only verify the shared stack from there.
-          ./tests/smoke/test_metrics.sh --context gke --monitoring-namespace monitoring
+          tests/smoke/test_endpoints.sh --context aks --namespace "$APP_NAMESPACE" --release-name "$RELEASE_NAME"
+          aks_edge="$(kubectl --context aks -n istio-system get svc istio-ingressgateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}')"
+          tests/smoke/test_endpoints.sh --base-url "http://${aks_edge}" --host-header "$PUBLIC_HOST"

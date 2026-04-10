@@ -5,8 +5,10 @@ on:
     branches:
       - main
     paths:
-      - "terraform/**"
-      - "routing/traffic-manager/**"
+      - 'terraform/**'
+      - 'routing/traffic-manager/**'
+      - '.github/workflows/terraform-apply.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,67 +18,64 @@ concurrency:
   group: terraform-apply-main
   cancel-in-progress: false
 
-env:
-  TF_IN_AUTOMATION: "true"
-  TF_INPUT: "false"
-  TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-  TF_VAR_gcp_region: ${{ vars.GKE_LOCATION }}
-  TF_VAR_gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
-  TF_VAR_azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  TF_VAR_azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
-  TF_VAR_aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
-  TF_VAR_aks_resource_group_name: ${{ vars.AKS_RESOURCE_GROUP }}
-  TF_VAR_dns_zone_name: ${{ vars.DNS_ZONE_NAME }}
-  TF_VAR_resource_group_name: ${{ vars.ROUTING_RESOURCE_GROUP }}
-  TF_VAR_profile_relative_name: ${{ vars.TRAFFIC_MANAGER_RELATIVE_NAME }}
-  TF_VAR_shared_hostname: ${{ vars.APP_FQDN }}
-  TF_VAR_gke_endpoint_fqdn: ${{ vars.GKE_APP_FQDN }}
-  TF_VAR_aks_endpoint_fqdn: ${{ vars.AKS_APP_FQDN }}
-
 jobs:
   apply:
-    runs-on: ubuntu-24.04
-    environment: dev
-
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.1
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+      - name: Auth and kubeconfig
+        uses: ./.github/actions/setup-kubeconfig
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp_service_account: ${{ vars.GCP_CICD_SERVICE_ACCOUNT }}
+          gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke_location: ${{ vars.GKE_LOCATION }}
+          azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
 
-      - name: Authenticate to Azure
-        uses: azure/login@v2.3.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Set up Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3.1.2
+        with:
+          terraform_wrapper: false
+          terraform_version: 1.14.8
 
-      - name: Apply root stack
+      - name: Apply core Terraform
         working-directory: terraform
-        shell: bash
         run: |
-          set -euo pipefail
-          terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="prefix=${{ vars.TF_STATE_PREFIX }}"
-          terraform validate -no-color
-          terraform plan -no-color -out=tfplan
-          terraform apply -auto-approve tfplan
+          export TF_VAR_gcp_project_id="${{ vars.GCP_PROJECT_ID }}"
+          export TF_VAR_azure_subscription_id="${{ vars.AZURE_SUBSCRIPTION_ID }}"
+          export TF_VAR_public_dns_zone_name="${{ vars.PUBLIC_DNS_ZONE_NAME }}"
+          export TF_VAR_traffic_manager_relative_name="${{ vars.TRAFFIC_MANAGER_RELATIVE_NAME }}"
 
-      - name: Apply routing stack
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/core"
+          terraform apply -auto-approve
+
+      - name: Apply edge routing Terraform
         working-directory: routing/traffic-manager
-        shell: bash
         run: |
-          set -euo pipefail
-          terraform init
-          terraform validate -no-color
-          terraform plan -no-color -out=tfplan
-          terraform apply -auto-approve tfplan
+          export TF_VAR_azure_subscription_id="${{ vars.AZURE_SUBSCRIPTION_ID }}"
+          export TF_VAR_public_zone_name="${{ vars.PUBLIC_DNS_ZONE_NAME }}"
+          export TF_VAR_public_zone_resource_group_name="${{ vars.AZURE_DNS_RESOURCE_GROUP }}"
+          export TF_VAR_public_record_name="${{ vars.PUBLIC_APP_RECORD_NAME }}"
+          export TF_VAR_gke_endpoint_fqdn="${{ vars.GKE_EDGE_HOST }}"
+          export TF_VAR_aks_endpoint_fqdn="${{ vars.AKS_EDGE_HOST }}"
+          export TF_VAR_create_public_cname="true"
+
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/routing-edge"
+          terraform apply -auto-approve

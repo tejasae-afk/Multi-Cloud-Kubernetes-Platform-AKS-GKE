@@ -19,7 +19,7 @@ resource "google_dns_managed_zone" "public" {
   labels      = var.labels
 }
 
-# TODO: configre the GKE edge record once the ingress gateway service owns the reserved IP.
+# TODO: configure the GKE edge record once the ingress gateway service owns the reserved IP.
 resource "google_dns_record_set" "gke_edge" {
   project      = var.gcp_project_id
   managed_zone = google_dns_managed_zone.public.name

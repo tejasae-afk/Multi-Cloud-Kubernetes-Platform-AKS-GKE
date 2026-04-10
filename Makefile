@@ -36,7 +36,7 @@ apply-all:
 	terraform -chdir=$(TF_DIR) apply -lock-timeout=20m
 
 deploy-app:
-	# retreive kube creds from outputs if context switching gets annoying
+	# retrieve kube creds from outputs if context switching gets annoying
 	kubectl apply -k kubernetes/base
 	kubectl apply -k kubernetes/overlays/shared
 

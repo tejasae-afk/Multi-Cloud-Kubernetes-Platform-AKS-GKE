@@ -1,117 +1,105 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SHARED_URL="${1:-https://api.platform.haleops.net/api/health}"
-GKE_HOST="${2:-gke-api.platform.haleops.net}"
-AKS_HOST="${3:-aks-api.platform.haleops.net}"
+PUBLIC_HOST="${PUBLIC_HOST:-}"
+SCHEME="${SCHEME:-http}"
+PATH_VALUE="${PATH_VALUE:-/api/health}"
 REQUESTS="${REQUESTS:-200}"
 SLEEP_BETWEEN="${SLEEP_BETWEEN:-0}"
 
-RED=$'\033[31m'
-GREEN=$'\033[32m'
-YELLOW=$'\033[33m'
-BLUE=$'\033[34m'
-RESET=$'\033[0m'
+usage() {
+  cat <<USAGE
+Usage:
+  $(basename "$0") --public-host <host> [--scheme http|https] [--path /api/health] [--requests 200]
 
-need_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    printf '%sMissing command: %s%s\n' "${RED}" "$1" "${RESET}" >&2
+Notes:
+  The script expects deploy.yml to have already stamped x-served-by on the response.
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --public-host)
+      PUBLIC_HOST="$2"
+      shift 2
+      ;;
+    --scheme)
+      SCHEME="$2"
+      shift 2
+      ;;
+    --path)
+      PATH_VALUE="$2"
+      shift 2
+      ;;
+    --requests)
+      REQUESTS="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown flag: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+[[ -n "$PUBLIC_HOST" ]] || { echo "--public-host is required" >&2; exit 1; }
+
+gke_count=0
+aks_count=0
+other_count=0
+
+for ((i=1; i<=REQUESTS; i++)); do
+  headers="$(mktemp)"
+  status_code="$(curl -sS -D "$headers" -o /dev/null -w '%{http_code}' "${SCHEME}://${PUBLIC_HOST}${PATH_VALUE}")"
+  if [[ "$status_code" != "200" ]]; then
+    echo "request $i returned status $status_code" >&2
+    rm -f "$headers"
     exit 1
   fi
-}
 
-need_cmd curl
-need_cmd dig
-
-ips_for_host() {
-  dig +short "$1" | sort -u
-}
-
-contains_ip() {
-  local needle="$1"
-  shift
-  for item in "$@"; do
-    if [[ "${needle}" == "${item}" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-detect_target() {
-  local headers body result remote_ip served_by
-  headers="$(mktemp)"
-  body="$(mktemp)"
-  result="$(curl -ksS -o "${body}" -D "${headers}" --max-time 10 -w '%{remote_ip}' "${SHARED_URL}" || true)"
-  remote_ip="${result}"
-  served_by="$(awk -F': ' 'tolower($1)=="x-served-by" {gsub("\r","",$2); print tolower($2)}' "${headers}" | tail -n1)"
-  rm -f "${headers}" "${body}"
-
-  if [[ "${served_by}" == *"gke"* ]]; then
-    printf 'gke'
-    return 0
-  fi
-
-  if [[ "${served_by}" == *"aks"* ]]; then
-    printf 'aks'
-    return 0
-  fi
-
-  if contains_ip "${remote_ip}" "${GKE_IPS[@]}"; then
-    printf 'gke'
-    return 0
-  fi
-
-  if contains_ip "${remote_ip}" "${AKS_IPS[@]}"; then
-    printf 'aks'
-    return 0
-  fi
-
-  printf 'unknown'
-}
-
-mapfile -t GKE_IPS < <(ips_for_host "${GKE_HOST}")
-mapfile -t AKS_IPS < <(ips_for_host "${AKS_HOST}")
-
-printf '%sGKE IPs:%s %s\n' "${BLUE}" "${RESET}" "${GKE_IPS[*]}"
-printf '%sAKS IPs:%s %s\n' "${BLUE}" "${RESET}" "${AKS_IPS[*]}"
-
-gke=0
-aks=0
-unknown=0
-
-for i in $(seq 1 "${REQUESTS}"); do
-  target="$(detect_target)"
-  case "${target}" in
-    gke) gke=$((gke + 1)) ;;
-    aks) aks=$((aks + 1)) ;;
-    *) unknown=$((unknown + 1)) ;;
+  served_by="$(awk -F': ' 'tolower($1)=="x-served-by" {print $2}' "$headers" | tr -d '' | tail -n1)"
+  case "$served_by" in
+    gke)
+      gke_count=$((gke_count + 1))
+      ;;
+    aks)
+      aks_count=$((aks_count + 1))
+      ;;
+    *)
+      other_count=$((other_count + 1))
+      ;;
   esac
 
-  if [[ "${SLEEP_BETWEEN}" != "0" ]]; then
-    sleep "${SLEEP_BETWEEN}"
+  rm -f "$headers"
+  if (( SLEEP_BETWEEN > 0 )); then
+    sleep "$SLEEP_BETWEEN"
   fi
 done
 
-total=$((gke + aks + unknown))
-
-pct() {
-  python3 - <<'PY' "$1" "$2"
-import sys
-part = int(sys.argv[1])
-total = int(sys.argv[2])
-if total == 0:
-    print("0.0")
-else:
-    print(f"{(part / total) * 100:.1f}")
-PY
+percent() {
+  local value="$1"
+  awk -v v="$value" -v total="$REQUESTS" 'BEGIN { printf "%.1f", (v / total) * 100 }'
 }
 
-printf '\n%sTraffic split over %s requests%s\n' "${GREEN}" "${total}" "${RESET}"
-printf '  GKE:     %4s (%s%%)\n' "${gke}" "$(pct "${gke}" "${total}")"
-printf '  AKS:     %4s (%s%%)\n' "${aks}" "$(pct "${aks}" "${total}")"
-printf '  Unknown: %4s (%s%%)\n' "${unknown}" "$(pct "${unknown}" "${total}")"
+gke_pct="$(percent "$gke_count")"
+aks_pct="$(percent "$aks_count")"
+other_pct="$(percent "$other_count")"
 
-if [[ "${unknown}" -gt 0 ]]; then
-  printf '%sSome responses could not be mapped back to a cluster. That usually means the shared host moved to a new LB IP before the script refreshed its lookup set.%s\n' "${YELLOW}" "${RESET}"
+printf 'gke: %s (%s%%)
+' "$gke_count" "$gke_pct"
+printf 'aks: %s (%s%%)
+' "$aks_count" "$aks_pct"
+printf 'other: %s (%s%%)
+' "$other_count" "$other_pct"
+printf 'RESULT gke=%s aks=%s other=%s total=%s gke_pct=%s aks_pct=%s
+' "$gke_count" "$aks_count" "$other_count" "$REQUESTS" "$gke_pct" "$aks_pct"
+
+if (( other_count > REQUESTS / 4 )); then
+  echo "too many responses came back without x-served-by" >&2
+  exit 1
 fi

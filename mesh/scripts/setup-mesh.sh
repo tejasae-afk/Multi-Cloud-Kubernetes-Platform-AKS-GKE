@@ -243,5 +243,4 @@ for step in $(seq "$START_FROM" 12); do
 done
 
 printf "${GREEN}mesh setup finished${NC}\n"
-# GKE east-west gw came up fine. AKS LB stuck Pending - investigating.
 # TODO: teach this script to rotate remote secrets instead of just reapplying them.

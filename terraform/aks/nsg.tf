@@ -5,7 +5,7 @@ resource "azurerm_network_security_group" "this" {
   tags                = var.tags
 }
 
-# NOTE: don't change this, breaks AKS east-west for reasons I don't fully get.
+# NOTE: don't touch this, breaks AKS east-west for reasons I don't fully get.
 resource "azurerm_network_security_rule" "istio_15443" {
   name                        = "allow-istio-eastwest-15443"
   priority                    = 300

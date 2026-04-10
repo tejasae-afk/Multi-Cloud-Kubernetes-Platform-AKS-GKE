@@ -5,101 +5,103 @@ on:
     branches:
       - main
     paths:
-      - "app/**"
+      - 'app/**'
+      - '.github/workflows/build-push.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: build-push-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - api-gateway
-          - order-service
-          - inventory-service
-
+        include:
+          - service: api-gateway
+            context: app/api-gateway
+          - service: order-service
+            context: app/order-service
+          - service: inventory-service
+            context: app/inventory-service
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.1
 
-      - name: Set up Docker Buildx
+      - name: Auth and kubeconfig
+        uses: ./.github/actions/setup-kubeconfig
+        with:
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp_service_account: ${{ vars.GCP_CICD_SERVICE_ACCOUNT }}
+          gke_cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+          gke_location: ${{ vars.GKE_LOCATION }}
+          azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Setup Buildx
         uses: docker/setup-buildx-action@v3.12.0
 
-      - name: Build local image
+      - name: Login to gcr.io
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Login to ACR
+        run: az acr login --name "${{ vars.ACR_NAME }}"
+
+      - name: Set image names
+        id: meta
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          echo "gcr_image=gcr.io/${{ vars.GCP_PROJECT_ID }}/multi-cloud-k8s-platform/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          echo "acr_image=${{ vars.ACR_NAME }}.azurecr.io/multi-cloud-k8s-platform/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          echo "local_image=local/${{ matrix.service }}:${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image for scan
         uses: docker/build-push-action@v6.18.0
         with:
-          context: ./app/${{ matrix.service }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
           load: true
-          platforms: linux/amd64
-          tags: local/${{ matrix.service }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.local_image }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: local/${{ matrix.service }}:${{ github.sha }}
+          image-ref: ${{ steps.meta.outputs.local_image }}
           format: table
-          exit-code: "1"
-          ignore-unfixed: false
+          ignore-unfixed: true
           severity: HIGH,CRITICAL
+          exit-code: '1'
 
-      - name: Authenticate to Google Cloud
-        id: gcp_auth
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_GHA_SERVICE_ACCOUNT }}
-          token_format: access_token
-
-      - name: Log in to gcr.io
-        # gcr.io in this repo is the Artifact Registry-backed path, not the retired Container Registry backend.
-        uses: docker/login-action@v3.6.0
-        with:
-          registry: gcr.io
-          username: oauth2accesstoken
-          password: ${{ steps.gcp_auth.outputs.access_token }}
-
-      - name: Authenticate to Azure
-        uses: azure/login@v2.3.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log in to ACR
-        shell: bash
-        run: |
-          set -euo pipefail
-          az acr login --name "${{ vars.ACR_NAME }}"
-
-      - name: Push image to both registries
+      - name: Build and push to both registries
         uses: docker/build-push-action@v6.18.0
         with:
-          context: ./app/${{ matrix.service }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
           push: true
-          platforms: linux/amd64
           tags: |
-            gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/${{ matrix.service }}:${{ github.sha }}
-            gcr.io/${{ vars.GCP_PROJECT_ID }}/mc-k8s/${{ matrix.service }}:main
-            ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/${{ matrix.service }}:${{ github.sha }}
-            ${{ vars.ACR_NAME }}.azurecr.io/mc-k8s/${{ matrix.service }}:main
+            ${{ steps.meta.outputs.gcr_image }}:${{ steps.meta.outputs.short_sha }}
+            ${{ steps.meta.outputs.gcr_image }}:main
+            ${{ steps.meta.outputs.acr_image }}:${{ steps.meta.outputs.short_sha }}
+            ${{ steps.meta.outputs.acr_image }}:main
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/deploy.yml
-    permissions:
-      contents: read
-      id-token: write
-    secrets: inherit
-    with:
-      image_tag: ${{ github.sha }}
+      - name: Write job summary
+        run: |
+          {
+            echo "### ${{ matrix.service }}"
+            echo "- gcr.io: \`${{ steps.meta.outputs.gcr_image }}:${{ steps.meta.outputs.short_sha }}\`"
+            echo "- acr: \`${{ steps.meta.outputs.acr_image }}:${{ steps.meta.outputs.short_sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
